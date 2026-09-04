@@ -76,6 +76,7 @@ class CollectionConfigTests(unittest.TestCase):
             config.polygons.path, project_root / "data/external/polygons.geojson"
         )
         self.assertEqual(config.period.start, date(2024, 4, 1))
+        self.assertEqual(config.polygons.id_prefix, "EXT-ZGD-")
         self.assertTrue(config.sensors.sentinel2.enabled)
 
     def test_invalid_period_is_rejected(self):
@@ -204,7 +205,7 @@ class FieldDiscoveryTests(unittest.TestCase):
 
             self.assertEqual(len(result["features"]), 1)
             properties = result["features"][0]["properties"]
-            self.assertEqual(properties["polygon_id"], "EXT-ZGD-0001")
+            self.assertEqual(properties["polygon_id"], "EXT-0001")
             self.assertEqual(properties["osm_way_id"], 123)
             self.assertEqual(properties["source_license"], "ODbL")
 
@@ -240,6 +241,59 @@ class ExternalDatasetTests(unittest.TestCase):
             self.assertAlmostEqual(result.loc[0, "primary_ndvi"], 0.3)
             self.assertTrue(pd.isna(result.loc[1, "primary_ndvi"]))
             self.assertEqual(set(result["crop_type"]), {"неизвестно"})
+
+    def test_multiyear_dataset_builds_cross_year_climatology(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            config = CollectionRunnerTests()._config(root, root / "fields.geojson")
+            paths = []
+            for year, ndvi in [(2023, 0.4), (2024, 0.6)]:
+                path = root / f"sentinel2-{year}.csv"
+                pd.DataFrame(
+                    {
+                        "polygon_id": ["EXT-1"],
+                        "date": [f"{year}-04-01"],
+                        "ndvi": [ndvi],
+                        "evi": [ndvi / 2],
+                        "ndwi": [-ndvi],
+                    }
+                ).to_csv(path, index=False)
+                paths.append(path)
+
+            result = build_external_dataset(config, paths)
+            observed = result[result["primary_ndvi"].notna()].sort_values("year")
+
+            self.assertEqual(len(result), 2 * 213)
+            self.assertEqual(observed["n_reference_years"].tolist(), [1, 1])
+            self.assertAlmostEqual(
+                float(observed.iloc[0]["ndvi_climatology_mean"]), 0.6
+            )
+            self.assertAlmostEqual(
+                float(observed.iloc[1]["ndvi_climatology_mean"]), 0.4
+            )
+
+    def test_multiyear_climatology_can_assign_text_status(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            config = CollectionRunnerTests()._config(root, root / "fields.geojson")
+            paths = []
+            for year, values in [(2023, [0.3, 0.5]), (2024, [0.6, 0.8])]:
+                path = root / f"sentinel2-{year}.csv"
+                pd.DataFrame(
+                    {
+                        "polygon_id": ["EXT-1", "EXT-1"],
+                        "date": [f"{year}-04-01", f"{year}-04-02"],
+                        "ndvi": values,
+                        "evi": values,
+                        "ndwi": [-value for value in values],
+                    }
+                ).to_csv(path, index=False)
+                paths.append(path)
+
+            result = build_external_dataset(config, paths)
+            observed = result[result["primary_ndvi"].notna()]
+
+            self.assertTrue(observed["status"].notna().all())
 
 
 if __name__ == "__main__":

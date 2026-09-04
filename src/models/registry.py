@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from src.config import ModelDefinition, TrainingConfig
 from src.models.base import GapModel
-from src.models.boosting import CatBoostModel, LightGBMModel, RandomForestModel
+from src.models.boosting import (
+    CatBoostModel,
+    HistoryRoutedLightGBMModel,
+    LightGBMModel,
+    RandomForestModel,
+)
 from src.models.heuristic import BaselineModel, HeuristicEnsembleModel
 
 
@@ -12,6 +17,7 @@ MODEL_REGISTRY: dict[str, type[GapModel]] = {
     "baseline": BaselineModel,
     "heuristic_ensemble": HeuristicEnsembleModel,
     "lightgbm": LightGBMModel,
+    "history_routed_lightgbm": HistoryRoutedLightGBMModel,
     "catboost": CatBoostModel,
     "random_forest": RandomForestModel,
 }

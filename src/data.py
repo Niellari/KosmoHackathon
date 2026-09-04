@@ -81,25 +81,30 @@ def load_external_training_data(
 
     if not config.enabled and not include_when_disabled:
         return None
-    if not config.paths:
-        raise ValueError("Для external data не задан ни один путь")
+    active_sources = [
+        source
+        for source in config.sources
+        if source.enabled and source.sample_weight > 0
+    ]
+    if not active_sources:
+        raise ValueError("Для external data не задан ни один активный источник")
 
     frames: list[pd.DataFrame] = []
-    for path in config.paths:
-        frame = load_dataset(path)
+    for source in active_sources:
+        frame = load_dataset(source.path)
         invalid_ids = ~frame["anon_polygon_id"].str.startswith(
-            config.polygon_id_prefix
+            source.polygon_id_prefix
         )
         if invalid_ids.any():
             example = frame.loc[invalid_ids, "anon_polygon_id"].iloc[0]
             raise ValueError(
                 f"External polygon ID {example!r} не начинается с "
-                f"{config.polygon_id_prefix!r}"
+                f"{source.polygon_id_prefix!r} (source={source.name!r})"
             )
         missing_crop = frame["crop_type"].isin(["", "nan", "None"])
-        frame.loc[missing_crop, "crop_type"] = config.crop_type_fallback
-        frame["_data_source"] = f"external:{path.name}"
-        frame["_sample_weight"] = config.sample_weight
+        frame.loc[missing_crop, "crop_type"] = source.crop_type_fallback
+        frame["_data_source"] = f"external:{source.name}"
+        frame["_sample_weight"] = source.sample_weight
         frames.append(frame)
 
     combined = pd.concat(frames, ignore_index=True, sort=False)

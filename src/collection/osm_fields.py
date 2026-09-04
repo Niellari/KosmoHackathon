@@ -100,7 +100,7 @@ def build_field_collection(payload: dict, config, limit: int) -> dict:
             {
                 "type": "Feature",
                 "properties": {
-                    "polygon_id": f"EXT-ZGD-{index:04d}",
+                    "polygon_id": f"{config.polygons.id_prefix}{index:04d}",
                     "source": "OpenStreetMap",
                     "source_license": "ODbL",
                     "osm_way_id": osm_id,
@@ -112,6 +112,6 @@ def build_field_collection(payload: dict, config, limit: int) -> dict:
         )
     return {
         "type": "FeatureCollection",
-        "name": "zernograd_farmland_pilot",
+        "name": config.region.name,
         "features": features,
     }

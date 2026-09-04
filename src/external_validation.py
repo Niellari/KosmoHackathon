@@ -11,6 +11,34 @@ from src.data import load_dataset, load_external_training_data
 from src.pipeline import AnalysisPipeline
 
 
+def with_external_weight(config: AppConfig, weight: float) -> AppConfig:
+    payload = config.data.external.model_dump()
+    for source in payload["sources"]:
+        if source["enabled"]:
+            source["sample_weight"] = weight
+    external = config.data.external.__class__.model_validate(payload)
+    data = config.data.model_copy(update={"external": external})
+    return config.model_copy(update={"data": data})
+
+
+def with_external_source_weights(
+    config: AppConfig, weights: dict[str, float]
+) -> AppConfig:
+    """Переопределяет веса только указанных именованных источников."""
+
+    payload = config.data.external.model_dump()
+    known_names = {source["name"] for source in payload["sources"]}
+    unknown = sorted(set(weights) - known_names)
+    if unknown:
+        raise ValueError(f"Неизвестные external sources: {', '.join(unknown)}")
+    for source in payload["sources"]:
+        if source["name"] in weights:
+            source["sample_weight"] = weights[source["name"]]
+    external = config.data.external.__class__.model_validate(payload)
+    data = config.data.model_copy(update={"external": external})
+    return config.model_copy(update={"data": data})
+
+
 def validate_external_ab(
     train_path: Path | str,
     config: AppConfig,

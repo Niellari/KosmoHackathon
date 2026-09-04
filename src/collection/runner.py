@@ -47,6 +47,39 @@ def run_collect_command(args) -> Path:
     )
 
 
+def run_collect_history_command(args) -> list[Path]:
+    config = load_collection_config(args.config)
+    if not config.sensors.sentinel2.enabled:
+        raise ValueError("Sentinel-2 отключён в collection-конфигурации")
+    years = sorted(set(args.years))
+    if any(year < 2017 or year > date.today().year for year in years):
+        raise ValueError("Для Sentinel-2 SR используйте годы от 2017 до текущего")
+
+    from src.collection.earth_engine import EarthEngineSentinel2Provider
+
+    provider = EarthEngineSentinel2Provider(config)
+    limit = args.limit or config.polygons.selection.limit
+    outputs: list[Path] = []
+    for year in years:
+        start_date = config.period.start.replace(year=year)
+        end_date = config.period.end.replace(year=year)
+        output_path = config.output.raw_directory / f"sentinel2-{year}.csv"
+        print(f"Сбор сезона {year}: {start_date}..{end_date}")
+        outputs.append(
+            collect_observations(
+                config=config,
+                provider=provider,
+                sensor="sentinel2",
+                start_date=start_date,
+                end_date=end_date,
+                output_path=output_path,
+                limit=limit,
+                force=args.force or config.execution.overwrite,
+            )
+        )
+    return outputs
+
+
 def collect_observations(
     config: CollectionConfig,
     provider: ObservationProvider,

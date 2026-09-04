@@ -79,6 +79,22 @@ class FeatureBuilder:
                 result.append("historical_std")
             if self.config.polygon_history.include_reference_years:
                 result.append("n_reference_years_calc")
+            if self.config.polygon_history.expanded_statistics:
+                for window in self.config.polygon_history.doy_windows:
+                    result.extend(
+                        [
+                            f"historical_mean_w{window}",
+                            f"historical_median_w{window}",
+                            f"historical_std_w{window}",
+                            f"historical_q25_w{window}",
+                            f"historical_q75_w{window}",
+                            f"historical_iqr_w{window}",
+                            f"historical_years_w{window}",
+                        ]
+                    )
+                result.extend(
+                    ["historical_recent_weighted", "historical_year_trend"]
+                )
         if self.config.crop_curve.enabled:
             result.append("crop_curve")
         if self.config.calendar.enabled:
@@ -142,6 +158,107 @@ class FeatureBuilder:
             crop_aggregation=crop.aggregation,
             ensemble_params=ensemble_params,
         )
+
+    def _calculated_history_features(
+        self, interpolator: GapInterpolator, row: pd.Series
+    ) -> dict[str, float]:
+        """Считает историю одинаково для train и inference без текущего сезона."""
+
+        history = self.config.polygon_history
+        result: dict[str, float] = {
+            "historical": np.nan,
+            "historical_std": np.nan,
+            "n_reference_years_calc": 0.0,
+        }
+        arrays = interpolator._history_arrays.get(str(row["anon_polygon_id"]))
+        if arrays is None or not history.enabled:
+            return result
+
+        target_year = int(row["year"])
+        target_doy = int(row["doy"])
+        years, days, all_values = arrays
+        other_seasons = years != target_year
+        distances = np.abs(days - target_doy)
+
+        def selected(window: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+            mask = other_seasons & (distances <= window)
+            return all_values[mask], years[mask], distances[mask]
+
+        values, selected_years, selected_distances = selected(history.doy_window)
+        if len(values):
+            result["historical"] = interpolator._weighted_stat(
+                values, selected_distances, scale=history.weighting_scale
+            )
+            result["historical_std"] = float(np.std(values))
+            result["n_reference_years_calc"] = float(
+                np.unique(selected_years).size
+            )
+
+        if not history.expanded_statistics:
+            return result
+
+        largest_values, largest_years, largest_distances = selected(
+            max(history.doy_windows)
+        )
+        for window in history.doy_windows:
+            window_values, window_years, _ = selected(window)
+            prefix = f"historical_{{}}_w{window}"
+            if not len(window_values):
+                result[prefix.format("years")] = 0.0
+            else:
+                result[prefix.format("years")] = float(
+                    np.unique(window_years).size
+                )
+            result[prefix.format("mean")] = (
+                float(np.mean(window_values)) if len(window_values) else np.nan
+            )
+            result[prefix.format("median")] = (
+                float(np.median(window_values)) if len(window_values) else np.nan
+            )
+            result[prefix.format("std")] = (
+                float(np.std(window_values)) if len(window_values) else np.nan
+            )
+            q25 = (
+                float(np.quantile(window_values, 0.25))
+                if len(window_values)
+                else np.nan
+            )
+            q75 = (
+                float(np.quantile(window_values, 0.75))
+                if len(window_values)
+                else np.nan
+            )
+            result[prefix.format("q25")] = q25
+            result[prefix.format("q75")] = q75
+            result[prefix.format("iqr")] = (
+                q75 - q25 if np.isfinite(q25) and np.isfinite(q75) else np.nan
+            )
+
+        result["historical_recent_weighted"] = np.nan
+        result["historical_year_trend"] = np.nan
+        if len(largest_values):
+            year_distances = np.abs(largest_years - target_year).astype(float)
+            weights = np.exp(
+                -0.5 * np.square(largest_distances / history.weighting_scale)
+                -0.5 * np.square(year_distances / history.recent_year_scale)
+            )
+            if np.isfinite(weights).any() and weights.sum() > 0:
+                result["historical_recent_weighted"] = float(
+                    np.average(largest_values, weights=weights)
+                )
+            unique_years = np.unique(largest_years)
+            if len(unique_years) >= 2:
+                annual_values = np.asarray(
+                    [
+                        np.median(largest_values[largest_years == year])
+                        for year in unique_years
+                    ],
+                    dtype=float,
+                )
+                result["historical_year_trend"] = float(
+                    np.polyfit(unique_years.astype(float), annual_values, 1)[0]
+                )
+        return result
 
     def _calendar_features(
         self, record: dict, crop_type: str, doy: int, year: int
@@ -324,7 +441,8 @@ class FeatureBuilder:
         """Строит leave-one-out признаки для известных наблюдений."""
 
         known = frame[frame["primary_ndvi"].notna()].copy()
-        crop_curves = self.make_interpolator(frame)._crop_curves
+        interpolator = self.make_interpolator(frame)
+        crop_curves = interpolator._crop_curves
         records: list[dict] = []
         targets: list[float] = []
         indices: list[int] = []
@@ -375,6 +493,13 @@ class FeatureBuilder:
                         (str(row["crop_type"]), int(row["doy"])), np.nan
                     ),
                 }
+                if (
+                    self.config.polygon_history.calculation
+                    == "leave_one_season_out"
+                ):
+                    record.update(
+                        self._calculated_history_features(interpolator, row)
+                    )
                 self._calendar_features(
                     record, str(row["crop_type"]), int(row["doy"]), int(row["year"])
                 )
@@ -407,6 +532,7 @@ class FeatureBuilder:
         features = pd.DataFrame(records, index=indices).reindex(
             columns=self.feature_names
         )
+        features = features.apply(pd.to_numeric, errors="coerce").astype(float)
         return features, pd.Series(targets, index=indices, name="primary_ndvi")
 
     def build_prediction_set(
@@ -465,22 +591,9 @@ class FeatureBuilder:
                 else np.nan
             )
 
-            polygon_history = interpolator._polygon_groups.get(
-                str(row["anon_polygon_id"])
+            calculated_history = self._calculated_history_features(
+                interpolator, row
             )
-            historical_std = np.nan
-            n_reference_years = 0.0
-            if polygon_history is not None and self.config.polygon_history.enabled:
-                candidates = polygon_history[
-                    (polygon_history["year"] != int(row["year"]))
-                    & (
-                        (polygon_history["doy"] - int(row["doy"])).abs()
-                        <= self.config.polygon_history.doy_window
-                    )
-                ]
-                if len(candidates):
-                    historical_std = float(candidates["primary_ndvi"].std(ddof=0))
-                    n_reference_years = float(candidates["year"].nunique())
 
             record = {
                 "previous_1": previous_1,
@@ -493,11 +606,15 @@ class FeatureBuilder:
                 "linear": _linear_value(
                     previous_1, next_1, previous_days, next_days
                 ),
-                "historical": base.at[index, "historical"],
-                "historical_std": historical_std,
-                "n_reference_years_calc": n_reference_years,
+                "historical": calculated_history["historical"],
+                "historical_std": calculated_history["historical_std"],
+                "n_reference_years_calc": calculated_history[
+                    "n_reference_years_calc"
+                ],
                 "crop_curve": base.at[index, "crop_curve"],
             }
+            if self.config.polygon_history.expanded_statistics:
+                record.update(calculated_history)
             self._calendar_features(
                 record, str(row["crop_type"]), int(row["doy"]), int(row["year"])
             )
@@ -528,4 +645,5 @@ class FeatureBuilder:
         features = pd.DataFrame(records, index=targets.index).reindex(
             columns=self.feature_names
         )
+        features = features.apply(pd.to_numeric, errors="coerce").astype(float)
         return features, base

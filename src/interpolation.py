@@ -122,6 +122,14 @@ class GapInterpolator:
             key: group[group["primary_ndvi"].notna()].copy()
             for key, group in self.context.groupby("anon_polygon_id", sort=False)
         }
+        self._history_arrays = {
+            str(key): (
+                group["year"].to_numpy(int),
+                group["doy"].to_numpy(float),
+                group["primary_ndvi"].to_numpy(float),
+            )
+            for key, group in self._polygon_groups.items()
+        }
         self._crop_groups = {
             key: group[group["primary_ndvi"].notna()].copy()
             for key, group in self.context.groupby("crop_type", sort=False)

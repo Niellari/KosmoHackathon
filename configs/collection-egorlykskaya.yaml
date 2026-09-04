@@ -1,15 +1,15 @@
 region:
-  name: zernograd_agriculture_pilot
+  name: egorlykskaya_agriculture
   bbox:
-    min_lon: 40.0
-    min_lat: 46.65
-    max_lon: 40.65
-    max_lat: 47.05
+    min_lon: 40.20
+    min_lat: 46.20
+    max_lon: 41.10
+    max_lat: 46.64
 
 polygons:
-  path: ../data/external/polygons.geojson
+  path: ../data/external/egorlykskaya/polygons.geojson
   id_property: polygon_id
-  id_prefix: EXT-ZGD-
+  id_prefix: EXT-EGL-
   selection:
     limit: 10
     min_area_ha: 20
@@ -42,9 +42,9 @@ sensors:
     enabled: false
 
 output:
-  raw_directory: ../artifacts/collection/raw
-  manifest_directory: ../artifacts/collection/manifests
-  dataset_path: ../data/external/processed/zernograd_2019_2024.csv
+  raw_directory: ../artifacts/collection/egorlykskaya/raw
+  manifest_directory: ../artifacts/collection/egorlykskaya/manifests
+  dataset_path: ../data/external/processed/egorlykskaya_2019_2024.csv
   format: csv
 
 execution:

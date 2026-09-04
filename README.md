@@ -219,10 +219,11 @@ python main.py serve \
 
 ```yaml
 models:
-  selected: lightgbm
+  selected: routed_lightgbm
 ```
 
-Доступны `baseline`, `ensemble`, `lightgbm`, `random_forest` и `catboost`.
+Доступны `baseline`, `ensemble`, `lightgbm`, `routed_lightgbm`,
+`random_forest` и `catboost`.
 Выбор можно временно переопределить без редактирования файла:
 
 ```bash
@@ -235,6 +236,25 @@ Forest устанавливаются из `requirements.txt`. CatBoost явля
 
 ```bash
 pip install catboost
+```
+
+`routed_lightgbm` содержит два LightGBM-эксперта в одном артефакте. Для строки
+с историей полигона используется history-rich эксперт со всеми признаками. Если
+исторических сезонов нет, автоматически выбирается cold-start эксперт, который
+не видит `historical`, `historical_std` и `n_reference_years_calc`. Оба эксперта
+обучаются и применяются одним обычным запуском `predict`, `validate` или `serve`.
+Порог доступной истории и параметры экспертов задаются независимо:
+
+```yaml
+models:
+  available:
+    routed_lightgbm:
+      type: history_routed_lightgbm
+      params:
+        min_reference_years: 1
+        common_params: {n_estimators: 350, learning_rate: 0.035}
+        history_rich_params: {}
+        cold_start_params: {}
 ```
 
 Обученная модель сохраняется в `artifacts/models/` и повторно используется,
@@ -353,6 +373,18 @@ cp data/external/polygons.example.geojson data/external/polygons.geojson
 python main.py collect --config configs/collection-pilot.yaml
 ```
 
+Собрать те же поля за несколько сезонов без захвата зимних дат:
+
+```bash
+python main.py collect-history \
+  --config configs/collection-pilot.yaml \
+  --years 2019 2020 2021 2022 2023 \
+  --limit 5
+```
+
+Каждый сезон сохраняется отдельно как `sentinel2-YYYY.csv` и имеет собственный
+manifest для безопасного возобновления.
+
 По умолчанию обрабатываются до 10 полигонов за сезон 2024 года. Результат
 появляется в `artifacts/collection/raw/sentinel2.csv`, а состояние выполнения —
 в `artifacts/collection/manifests/sentinel2.json`. Завершённые полигоны при
@@ -379,12 +411,22 @@ python main.py collect \
 Преобразовать scene-level наблюдения в ежедневную таблицу схемы train:
 
 ```bash
-python main.py prepare-external --config configs/collection-pilot.yaml
+python main.py prepare-external \
+  --config configs/collection-pilot.yaml \
+  --sentinel2 \
+    artifacts/collection/raw/sentinel2-2019.csv \
+    artifacts/collection/raw/sentinel2-2020.csv \
+    artifacts/collection/raw/sentinel2-2021.csv \
+    artifacts/collection/raw/sentinel2-2022.csv \
+    artifacts/collection/raw/sentinel2-2023.csv \
+    artifacts/collection/raw/sentinel2.csv
 ```
 
 Сцены и тайлы одного поля за одну дату объединяются медианой. Для каждого поля
 создаётся полная ежедневная сетка периода, `primary_ndvi` заполняется из
-`s2_ndvi`, а `crop_type` получает честное значение `неизвестно`. Результат
+`s2_ndvi`, а `crop_type` получает честное значение `неизвестно`. Для нескольких
+лет климатология каждой известной точки считается только по другим годам того
+же поля в окне `doy ± 21`. Результат
 сохраняется в `data/external/processed/external_dataset.csv` и остаётся
 изолированным от конкурсного train до A/B-валидации.
 
@@ -409,6 +451,12 @@ production-конфиге флаг остаётся выключенным. A/B-
 
 ```bash
 python main.py validate-external --config config.yaml
+```
+
+Вес external можно переопределить для абляции без редактирования YAML:
+
+```bash
+python main.py validate-external --config config.yaml --external-weight 0.10
 ```
 
 Сформировать отдельный submission экспериментальной external-моделью, не меняя

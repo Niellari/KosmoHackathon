@@ -10,6 +10,25 @@ from src.pipeline import AnalysisPipeline
 from src.submission import create_submission
 
 
+def _parse_external_source_weights(values: list[str]) -> dict[str, float]:
+    weights: dict[str, float] = {}
+    for value in values:
+        name, separator, raw_weight = value.partition("=")
+        if not separator or not name or not raw_weight:
+            raise ValueError(
+                "--external-source-weight ожидает значение NAME=WEIGHT"
+            )
+        if name in weights:
+            raise ValueError(f"Вес source {name!r} задан несколько раз")
+        try:
+            weights[name] = float(raw_weight)
+        except ValueError as error:
+            raise ValueError(
+                f"Некорректный вес external source {name!r}: {raw_weight!r}"
+            ) from error
+    return weights
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Анализ временных рядов NDVI")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -24,6 +43,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--with-external",
         action="store_true",
         help="Обучить экспериментальную модель с data.external",
+    )
+    predict.add_argument(
+        "--external-weight", type=float, help="Вес external-строк для эксперимента"
+    )
+    predict.add_argument(
+        "--external-source-weight",
+        action="append",
+        default=[],
+        metavar="NAME=WEIGHT",
+        help="Вес отдельного external-источника; параметр можно повторять",
     )
     predict.add_argument(
         "--target-column",
@@ -68,6 +97,13 @@ def build_parser() -> argparse.ArgumentParser:
     validate_external.add_argument("--model", help="Имя модели из models.available")
     validate_external.add_argument("--sample-size", type=int)
     validate_external.add_argument("--seeds", type=int, nargs="+")
+    validate_external.add_argument("--external-weight", type=float)
+    validate_external.add_argument(
+        "--external-source-weight",
+        action="append",
+        default=[],
+        metavar="NAME=WEIGHT",
+    )
 
     collect = subparsers.add_parser(
         "collect", help="Собрать внешние спутниковые наблюдения"
@@ -84,6 +120,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--force", action="store_true", help="Перезаписать существующий сбор"
     )
 
+    history = subparsers.add_parser(
+        "collect-history", help="Собрать одинаковые сезонные окна за несколько лет"
+    )
+    history.add_argument("--config", default="configs/collection-pilot.yaml")
+    history.add_argument("--years", type=int, nargs="+", required=True)
+    history.add_argument("--limit", type=int, help="Ограничение числа полигонов")
+    history.add_argument(
+        "--force", action="store_true", help="Перезаписать существующие сборы"
+    )
+
     discover = subparsers.add_parser(
         "discover-fields", help="Найти открытые контуры сельхозполей"
     )
@@ -98,7 +144,9 @@ def build_parser() -> argparse.ArgumentParser:
         "prepare-external", help="Собрать нормализованный внешний датасет"
     )
     prepare_external.add_argument("--config", default="configs/collection-pilot.yaml")
-    prepare_external.add_argument("--sentinel2", help="Путь к raw Sentinel-2 CSV")
+    prepare_external.add_argument(
+        "--sentinel2", nargs="+", help="Пути к raw Sentinel-2 CSV"
+    )
     prepare_external.add_argument("--output", help="Путь к итоговому CSV")
 
     return parser
@@ -121,6 +169,11 @@ def main() -> None:
 
         run_collect_command(args)
         return
+    if args.command == "collect-history":
+        from src.collection.runner import run_collect_history_command
+
+        run_collect_history_command(args)
+        return
 
     config = load_config(args.config)
 
@@ -135,8 +188,26 @@ def main() -> None:
             "ml": None,
         }[legacy_method]
     config = select_model(config, requested_model)
+    external_weight = getattr(args, "external_weight", None)
+    if external_weight is not None:
+        from src.external_validation import with_external_weight
+
+        config = with_external_weight(config, external_weight)
+    source_weight_values = getattr(args, "external_source_weight", [])
+    if source_weight_values:
+        from src.external_validation import with_external_source_weights
+
+        config = with_external_source_weights(
+            config, _parse_external_source_weights(source_weight_values)
+        )
 
     if args.command == "predict":
+        if (
+            args.external_weight is not None or args.external_source_weight
+        ) and not args.with_external:
+            raise ValueError(
+                "Настройка external-весов требует --with-external"
+            )
         if args.with_external:
             from src.external_validation import external_experiment_config
 

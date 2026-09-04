@@ -13,18 +13,31 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class ExternalDataConfig(StrictModel):
-    enabled: bool = False
-    paths: list[Path] = Field(default_factory=list)
-    usage: Literal["training_only"] = "training_only"
+class ExternalSourceConfig(StrictModel):
+    name: str = Field(min_length=1, pattern=r"^[a-z0-9][a-z0-9_-]*$")
+    enabled: bool = True
+    path: Path
     crop_type_fallback: str = Field(default="неизвестно", min_length=1)
     polygon_id_prefix: str = Field(default="EXT-", min_length=1)
-    sample_weight: float = Field(default=0.25, gt=0, le=1)
+    sample_weight: float = Field(default=0.25, ge=0, le=1)
+
+
+class ExternalDataConfig(StrictModel):
+    enabled: bool = False
+    usage: Literal["training_only"] = "training_only"
+    sources: list[ExternalSourceConfig] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def enabled_source_has_paths(self) -> "ExternalDataConfig":
-        if self.enabled and not self.paths:
-            raise ValueError("data.external.enabled=true требует хотя бы один path")
+    def sources_are_valid(self) -> "ExternalDataConfig":
+        names = [source.name for source in self.sources]
+        if len(names) != len(set(names)):
+            raise ValueError("Имена data.external.sources не должны повторяться")
+        if self.enabled and not any(
+            source.enabled and source.sample_weight > 0 for source in self.sources
+        ):
+            raise ValueError(
+                "data.external.enabled=true требует хотя бы один активный источник"
+            )
         return self
 
 
@@ -51,10 +64,28 @@ class InterpolationConfig(StrictModel):
 
 class PolygonHistoryConfig(StrictModel):
     enabled: bool = True
+    calculation: Literal["provided", "leave_one_season_out"] = "provided"
     doy_window: int = Field(default=21, ge=1, le=183)
     weighting_scale: float = Field(default=7.0, gt=0)
     include_std: bool = True
     include_reference_years: bool = True
+    expanded_statistics: bool = False
+    doy_windows: list[int] = Field(default_factory=lambda: [7, 14, 21])
+    recent_year_scale: float = Field(default=2.0, gt=0)
+
+    @model_validator(mode="after")
+    def valid_expanded_history(self) -> "PolygonHistoryConfig":
+        if not self.doy_windows:
+            raise ValueError("features.polygon_history.doy_windows не может быть пустым")
+        if any(window < 1 or window > 183 for window in self.doy_windows):
+            raise ValueError("Исторические окна должны находиться в диапазоне 1..183")
+        if len(set(self.doy_windows)) != len(self.doy_windows):
+            raise ValueError("Исторические окна не должны повторяться")
+        if self.expanded_statistics and self.calculation != "leave_one_season_out":
+            raise ValueError(
+                "expanded_statistics требует calculation=leave_one_season_out"
+            )
+        return self
 
 
 class CropCurveConfig(StrictModel):
@@ -132,7 +163,12 @@ class TrainingConfig(StrictModel):
 
 class ModelDefinition(StrictModel):
     type: Literal[
-        "baseline", "heuristic_ensemble", "lightgbm", "catboost", "random_forest"
+        "baseline",
+        "heuristic_ensemble",
+        "lightgbm",
+        "history_routed_lightgbm",
+        "catboost",
+        "random_forest",
     ]
     artifact_path: Path | None = None
     load_if_exists: bool = False
@@ -231,8 +267,11 @@ def load_config(path: Path | str = "config.yaml") -> AppConfig:
     base = config_path.resolve().parent
     external = config.data.external.model_copy(
         update={
-            "paths": [
-                _resolve_path(base, path) for path in config.data.external.paths
+            "sources": [
+                source.model_copy(
+                    update={"path": _resolve_path(base, source.path)}
+                )
+                for source in config.data.external.sources
             ]
         }
     )

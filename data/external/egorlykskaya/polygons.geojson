@@ -1,0 +1,386 @@
+{
+  "type": "FeatureCollection",
+  "name": "egorlykskaya_agriculture",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "polygon_id": "EXT-EGL-0001",
+        "source": "OpenStreetMap",
+        "source_license": "ODbL",
+        "osm_way_id": 74424870,
+        "landuse": "farmland",
+        "area_ha": 71.48
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              40.6749319,
+              46.2855565
+            ],
+            [
+              40.6746781,
+              46.2697103
+            ],
+            [
+              40.6800503,
+              46.269681
+            ],
+            [
+              40.6801349,
+              46.2854688
+            ],
+            [
+              40.6749319,
+              46.2855565
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "polygon_id": "EXT-EGL-0002",
+        "source": "OpenStreetMap",
+        "source_license": "ODbL",
+        "osm_way_id": 74424876,
+        "landuse": "farmland",
+        "area_ha": 64.43
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              40.6806848,
+              46.2854396
+            ],
+            [
+              40.6806425,
+              46.2696518
+            ],
+            [
+              40.6855494,
+              46.2697103
+            ],
+            [
+              40.6853379,
+              46.2854688
+            ],
+            [
+              40.6806848,
+              46.2854396
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "polygon_id": "EXT-EGL-0003",
+        "source": "OpenStreetMap",
+        "source_license": "ODbL",
+        "osm_way_id": 74424864,
+        "landuse": "farmland",
+        "area_ha": 71.51
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              40.6860993,
+              46.2854688
+            ],
+            [
+              40.686057,
+              46.2697688
+            ],
+            [
+              40.6914292,
+              46.2697395
+            ],
+            [
+              40.6913869,
+              46.2854396
+            ],
+            [
+              40.6860993,
+              46.2854688
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "polygon_id": "EXT-EGL-0004",
+        "source": "OpenStreetMap",
+        "source_license": "ODbL",
+        "osm_way_id": 74424863,
+        "landuse": "farmland",
+        "area_ha": 67.28
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              40.692106,
+              46.2854104
+            ],
+            [
+              40.6921483,
+              46.2697688
+            ],
+            [
+              40.6973089,
+              46.2697103
+            ],
+            [
+              40.6970128,
+              46.2853519
+            ],
+            [
+              40.692106,
+              46.2854104
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "polygon_id": "EXT-EGL-0005",
+        "source": "OpenStreetMap",
+        "source_license": "ODbL",
+        "osm_way_id": 74424866,
+        "landuse": "farmland",
+        "area_ha": 62.86
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              40.6978165,
+              46.2853227
+            ],
+            [
+              40.6979434,
+              46.2697103
+            ],
+            [
+              40.7027234,
+              46.269681
+            ],
+            [
+              40.7024696,
+              46.2852642
+            ],
+            [
+              40.6978165,
+              46.2853227
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "polygon_id": "EXT-EGL-0006",
+        "source": "OpenStreetMap",
+        "source_license": "ODbL",
+        "osm_way_id": 74424877,
+        "landuse": "farmland",
+        "area_ha": 74.56
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              40.7031464,
+              46.2852935
+            ],
+            [
+              40.7034002,
+              46.2696518
+            ],
+            [
+              40.7090262,
+              46.2696518
+            ],
+            [
+              40.7086878,
+              46.2852642
+            ],
+            [
+              40.7031464,
+              46.2852935
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "polygon_id": "EXT-EGL-0007",
+        "source": "OpenStreetMap",
+        "source_license": "ODbL",
+        "osm_way_id": 74424872,
+        "landuse": "farmland",
+        "area_ha": 79.45
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              40.7096184,
+              46.285235
+            ],
+            [
+              40.7096607,
+              46.2695641
+            ],
+            [
+              40.7156251,
+              46.2695056
+            ],
+            [
+              40.7154982,
+              46.285235
+            ],
+            [
+              40.7096184,
+              46.285235
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "polygon_id": "EXT-EGL-0008",
+        "source": "OpenStreetMap",
+        "source_license": "ODbL",
+        "osm_way_id": 74424879,
+        "landuse": "farmland",
+        "area_ha": 60.14
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              40.716175,
+              46.2852935
+            ],
+            [
+              40.7163019,
+              46.2695348
+            ],
+            [
+              40.7208281,
+              46.2694471
+            ],
+            [
+              40.7205743,
+              46.285235
+            ],
+            [
+              40.716175,
+              46.2852935
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "polygon_id": "EXT-EGL-0009",
+        "source": "OpenStreetMap",
+        "source_license": "ODbL",
+        "osm_way_id": 74424873,
+        "landuse": "farmland",
+        "area_ha": 72.13
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              40.7212884,
+              46.2852221
+            ],
+            [
+              40.7216268,
+              46.2694342
+            ],
+            [
+              40.7266606,
+              46.2694342
+            ],
+            [
+              40.7269567,
+              46.2851929
+            ],
+            [
+              40.7212884,
+              46.2852221
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "polygon_id": "EXT-EGL-0010",
+        "source": "OpenStreetMap",
+        "source_license": "ODbL",
+        "osm_way_id": 74424861,
+        "landuse": "farmland",
+        "area_ha": 64.5
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              40.7276335,
+              46.2852221
+            ],
+            [
+              40.7273374,
+              46.2694634
+            ],
+            [
+              40.7324135,
+              46.269288
+            ],
+            [
+              40.7320751,
+              46.2852513
+            ],
+            [
+              40.7276335,
+              46.2852221
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

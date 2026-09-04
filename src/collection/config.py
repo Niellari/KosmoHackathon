@@ -48,6 +48,7 @@ class PolygonSelectionConfig(StrictModel):
 class PolygonsConfig(StrictModel):
     path: Path
     id_property: str = Field(default="polygon_id", min_length=1)
+    id_prefix: str = Field(default="EXT-", min_length=1)
     selection: PolygonSelectionConfig = PolygonSelectionConfig()
 
 
@@ -105,6 +106,10 @@ class ExecutionConfig(StrictModel):
     overwrite: bool = False
 
 
+class ProcessingConfig(StrictModel):
+    climatology_window_days: int = Field(default=21, ge=1, le=90)
+
+
 class CollectionConfig(StrictModel):
     region: RegionConfig
     polygons: PolygonsConfig
@@ -113,6 +118,7 @@ class CollectionConfig(StrictModel):
     sensors: SensorsConfig = SensorsConfig()
     output: CollectionOutputConfig = CollectionOutputConfig()
     execution: ExecutionConfig = ExecutionConfig()
+    processing: ProcessingConfig = ProcessingConfig()
 
 
 def load_collection_config(path: Path | str) -> CollectionConfig:

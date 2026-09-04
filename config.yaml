@@ -4,12 +4,21 @@ data:
   external:
     # До положительного A/B-теста production/submission остаётся без external.
     enabled: false
-    paths:
-      - data/external/processed/external_dataset.csv
     usage: training_only
-    crop_type_fallback: неизвестно
-    polygon_id_prefix: EXT-
-    sample_weight: 0.25
+    sources:
+      - name: zernograd_osm
+        enabled: true
+        path: data/external/processed/zernograd_2019_2024.csv
+        crop_type_fallback: неизвестно
+        polygon_id_prefix: EXT-ZGD-
+        sample_weight: 0.50
+      - name: egorlykskaya_osm
+        # Будет включён после сбора; вес можно менять независимо через CLI.
+        enabled: false
+        path: data/external/processed/egorlykskaya_2019_2024.csv
+        crop_type_fallback: неизвестно
+        polygon_id_prefix: EXT-EGL-
+        sample_weight: 0.25
 
 features:
 
@@ -27,10 +36,14 @@ features:
 
   polygon_history:
     enabled: true
+    calculation: provided
     doy_window: 21
     weighting_scale: 7.0
     include_std: true
     include_reference_years: true
+    expanded_statistics: false
+    doy_windows: [7, 14, 21]
+    recent_year_scale: 2.0
 
   crop_curve:
     enabled: true
@@ -72,7 +85,7 @@ training:
     random_state: 42
 
 models:
-  selected: lightgbm
+  selected: routed_lightgbm
   on_unavailable: fallback
   fallback_to: ensemble
   available:
@@ -100,6 +113,23 @@ models:
         reg_lambda: 2.0
         verbosity: -1
         random_state: 42
+    routed_lightgbm:
+      type: history_routed_lightgbm
+      artifact_path: artifacts/models/routed_lightgbm.joblib
+      load_if_exists: true
+      params:
+        min_reference_years: 1
+        common_params:
+          n_estimators: 350
+          learning_rate: 0.035
+          num_leaves: 24
+          min_child_samples: 40
+          colsample_bytree: 0.9
+          reg_lambda: 2.0
+          verbosity: -1
+          random_state: 42
+        history_rich_params: {}
+        cold_start_params: {}
     catboost:
       type: catboost
       artifact_path: artifacts/models/catboost.joblib
