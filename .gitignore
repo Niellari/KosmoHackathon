@@ -3,6 +3,9 @@ __pycache__/
 .pytest_cache/
 .venv/
 .~lock.*#
+api/credentials.env
+api/save_page/
 artifacts/*.csv
 artifacts/models/
+artifacts/submissions/
 !artifacts/.gitkeep
