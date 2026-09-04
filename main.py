@@ -54,6 +54,27 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("--sample-size", type=int)
     validate.add_argument("--seed", type=int)
 
+    benchmark = subparsers.add_parser(
+        "benchmark",
+        help="Честная оценка на синтетических пропусках по спецификации платформы",
+    )
+    benchmark.add_argument("--config", default="config.yaml")
+    benchmark.add_argument("--train")
+    benchmark.add_argument("--model", help="Имя модели из models.available")
+    benchmark.add_argument("--repeats", type=int)
+    benchmark.add_argument("--mask-rate", type=float)
+    benchmark.add_argument("--holdout-fraction", type=float)
+    benchmark.add_argument("--seed", type=int)
+    benchmark.add_argument(
+        "--profile",
+        action="store_true",
+        help="Сравнить профиль синтетики с реальными пропусками теста",
+    )
+    benchmark.add_argument(
+        "--test",
+        help="Тестовый датасет для эталонного профиля (по умолчанию data.test_path)",
+    )
+
     return parser
 
 
@@ -110,6 +131,53 @@ def main() -> None:
         )
         print(f"Baseline RMSE: {metrics['baseline_rmse']:.6f}")
         print(f"{metrics['model']} RMSE: {metrics['model_rmse']:.6f}")
+        return
+
+    if args.command == "benchmark":
+        from src.benchmark import run_benchmark
+        from src.data import load_dataset
+        from src.synthetic import (
+            MaskSpec,
+            compare_profiles,
+            gap_profile,
+            generate_mask,
+            apply_mask,
+        )
+
+        settings = config.benchmark
+        train_path = Path(args.train) if args.train else config.data.train_path
+        repeats = args.repeats if args.repeats is not None else settings.repeats
+        mask_rate = (
+            args.mask_rate if args.mask_rate is not None else settings.mask_rate
+        )
+        seed = args.seed if args.seed is not None else settings.seed
+        holdout = (
+            args.holdout_fraction
+            if args.holdout_fraction is not None
+            else settings.holdout_fraction
+        )
+        train_frame = load_dataset(train_path)
+
+        if args.profile:
+            test_path = Path(args.test) if args.test else config.data.test_path
+            reference = gap_profile(load_dataset(test_path))
+            spec = MaskSpec(rate=mask_rate, seed=seed)
+            generated = gap_profile(
+                apply_mask(train_frame, generate_mask(train_frame, spec))
+            )
+            print(compare_profiles(reference, generated).to_string())
+            print()
+
+        result = run_benchmark(
+            frame=train_frame,
+            config=config,
+            model_name=config.models.selected,
+            repeats=repeats,
+            mask_rate=mask_rate,
+            seed=seed,
+            holdout_fraction=holdout,
+        )
+        print(result.render())
         return
 
     if args.command == "serve":

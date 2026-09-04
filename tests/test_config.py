@@ -15,7 +15,7 @@ class ConfigTests(unittest.TestCase):
     def test_default_config_is_valid(self):
         config = load_config("config.yaml")
 
-        self.assertEqual(config.models.selected, "lightgbm")
+        self.assertEqual(config.models.selected, "lightgbm_sensor")
         self.assertIn("catboost", config.models.available)
         self.assertEqual(config.predict.prediction_column, "primary_ndvi_true")
 
@@ -23,7 +23,7 @@ class ConfigTests(unittest.TestCase):
         config = load_config("config.yaml")
         changed = select_model(config, "baseline")
 
-        self.assertEqual(config.models.selected, "lightgbm")
+        self.assertEqual(config.models.selected, "lightgbm_sensor")
         self.assertEqual(changed.models.selected, "baseline")
 
     def test_unknown_config_fields_are_rejected(self):

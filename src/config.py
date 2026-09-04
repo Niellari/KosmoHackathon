@@ -67,7 +67,12 @@ class FeaturesConfig(StrictModel):
 
 class ModelDefinition(StrictModel):
     type: Literal[
-        "baseline", "heuristic_ensemble", "lightgbm", "catboost", "random_forest"
+        "baseline",
+        "heuristic_ensemble",
+        "lightgbm",
+        "lightgbm_sensor",
+        "catboost",
+        "random_forest",
     ]
     artifact_path: Path | None = None
     load_if_exists: bool = False
@@ -102,6 +107,15 @@ class ValidationConfig(StrictModel):
     seed: int = 42
 
 
+class BenchmarkConfig(StrictModel):
+    """Оценка на синтетических пропусках, повторяющих процесс платформы."""
+
+    repeats: int = Field(default=3, ge=1, le=50)
+    mask_rate: float = Field(default=0.15, gt=0.0, lt=1.0)
+    seed: int = 42
+    holdout_fraction: float = Field(default=0.5, ge=0.0, lt=1.0)
+
+
 class ServerConfig(StrictModel):
     host: str = "127.0.0.1"
     port: int = Field(default=8000, ge=1, le=65535)
@@ -116,6 +130,7 @@ class AppConfig(StrictModel):
     models: ModelsConfig
     predict: PredictConfig = PredictConfig()
     validation: ValidationConfig = ValidationConfig()
+    benchmark: BenchmarkConfig = BenchmarkConfig()
     server: ServerConfig = ServerConfig()
 
 

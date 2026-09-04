@@ -31,7 +31,7 @@ features:
     encoding: one_hot
 
 models:
-  selected: lightgbm
+  selected: lightgbm_sensor
   on_unavailable: fallback
   fallback_to: ensemble
   available:
@@ -59,6 +59,38 @@ models:
         reg_lambda: 2.0
         verbosity: -1
         random_state: 42
+    # Метамодель с сенсорными признаками: вероятности источника по орбитальному
+    # календарю плюс соседи по ряду каждого сенсора. Обучается через код
+    # инференса на сгенерированных масках. RMSE 0.0653 против 0.0745 без них.
+    lightgbm_sensor:
+      type: lightgbm_sensor
+      artifact_path: artifacts/models/lightgbm_sensor.joblib
+      load_if_exists: true
+      params:
+        per_sensor: true
+        n_masks: 10
+        mask_rate: 0.15
+        mask_seed: 1000
+        classifier_masks: 6
+        classifier_seed: 5000
+        # Параметры подобраны случайным поиском по 40 конфигурациям на бенчмарке
+        # и проверены на масках и полигонах, не участвовавших в отборе.
+        # Низкий colsample_bytree важен: признаков стало 34 вместо 20.
+        n_estimators: 900
+        learning_rate: 0.035
+        num_leaves: 48
+        min_child_samples: 20
+        colsample_bytree: 0.4
+        reg_lambda: 5.0
+        verbosity: -1
+        random_state: 42
+        classifier:
+          n_estimators: 300
+          learning_rate: 0.05
+          num_leaves: 31
+          verbosity: -1
+          random_state: 42
+
     catboost:
       type: catboost
       artifact_path: artifacts/models/catboost.joblib
@@ -88,6 +120,14 @@ predict:
 validation:
   sample_size: 3000
   seed: 42
+
+# Оценка на синтетических пропусках, воспроизводящих процесс платформы:
+# независимая маскировка 15% наблюдений и половина полигонов вне обучения.
+benchmark:
+  repeats: 3
+  mask_rate: 0.15
+  seed: 42
+  holdout_fraction: 0.5
 
 server:
   host: 127.0.0.1
