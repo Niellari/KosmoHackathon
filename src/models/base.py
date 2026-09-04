@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 
 import pandas as pd
 
+from src.config import TrainingConfig
 from src.features import FeatureBuilder
 
 
@@ -14,9 +15,15 @@ class ModelUnavailableError(RuntimeError):
 
 
 class GapModel(ABC):
-    def __init__(self, name: str, params: dict | None = None):
+    def __init__(
+        self,
+        name: str,
+        params: dict | None = None,
+        training: TrainingConfig | None = None,
+    ):
         self.name = name
         self.params = dict(params or {})
+        self.training = training or TrainingConfig()
 
     @abstractmethod
     def fit(self, train: pd.DataFrame, features: FeatureBuilder) -> "GapModel":

@@ -30,6 +30,11 @@ features:
     enabled: true
     encoding: one_hot
 
+training:
+  # residual доступен, но direct пока показывает лучший локальный RMSE.
+  target_mode: direct
+  residual_baseline: linear
+
 models:
   selected: lightgbm
   on_unavailable: fallback

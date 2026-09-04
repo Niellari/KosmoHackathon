@@ -239,6 +239,21 @@ pip install catboost
 Обученная модель сохраняется в `artifacts/models/` и повторно используется,
 только если конфигурация признаков, параметры и сигнатура train не изменились.
 
+Обучаемые модели поддерживают прямой прогноз и прогноз поправки к интерполяции:
+
+```yaml
+training:
+  target_mode: direct       # direct | residual
+  residual_baseline: linear
+```
+
+В режиме `residual` таргетом служит `primary_ndvi - linear_prediction`, а при
+инференсе предсказанная поправка прибавляется обратно к `linear_prediction`.
+Режим реализован, но текущий default оставлен `direct`: на контрольной маске из
+1000 точек direct показал RMSE 0.072809, residual-linear — 0.073607, а
+residual-neighbor-mean — 0.073970. Изменение блока `training` инвалидирует кэш
+модели и вызывает переобучение.
+
 Основной сценарий:
 
 1. Выбрать `anon_polygon_id`.

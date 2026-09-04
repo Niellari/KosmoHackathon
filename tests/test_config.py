@@ -16,6 +16,8 @@ class ConfigTests(unittest.TestCase):
         config = load_config("config.yaml")
 
         self.assertEqual(config.models.selected, "lightgbm")
+        self.assertEqual(config.training.target_mode, "direct")
+        self.assertEqual(config.training.residual_baseline, "linear")
         self.assertIn("catboost", config.models.available)
         self.assertEqual(config.predict.prediction_column, "primary_ndvi_true")
 
@@ -31,6 +33,14 @@ class ConfigTests(unittest.TestCase):
         config["server"]["unknown_option"] = True
 
         with self.assertRaises(ValidationError):
+            AppConfig.model_validate(config)
+
+    def test_residual_requires_enabled_baseline_feature(self):
+        config = load_config("config.yaml").model_dump()
+        config["training"]["target_mode"] = "residual"
+        config["features"]["interpolation"]["linear"] = False
+
+        with self.assertRaisesRegex(ValidationError, "requires|требует"):
             AppConfig.model_validate(config)
 
     def test_registry_builds_selected_model(self):

@@ -147,6 +147,10 @@ def run(args: argparse.Namespace) -> SubmissionReceipt:
                 )
         if authenticated and cookie_store:
             cookie_store.save(driver)
+        page.wait_until_submission_allowed(
+            timeout=config.browser.cooldown_timeout,
+            poll_interval=config.browser.cooldown_poll_interval,
+        )
         page.upload(validated.path, timeout=config.browser.login_timeout)
         if args.dry_run:
             receipt = SubmissionReceipt.create(
@@ -162,7 +166,8 @@ def run(args: argparse.Namespace) -> SubmissionReceipt:
             )
         else:
             previous_url, previous_result, submitted_button = page.submit(
-                timeout=config.browser.page_timeout
+                timeout=config.browser.page_timeout,
+                post_click_delay=config.browser.result_settle_delay,
             )
             platform_result = page.wait_for_result(
                 timeout=config.browser.result_timeout,

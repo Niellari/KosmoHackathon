@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import sys
 import time
 
 from api.config import AuthenticationConfig, SelectorConfig
@@ -180,8 +181,100 @@ class SubmissionPage:
         element.send_keys(str(file_path))
         get_logger().info("Файл выбран в форме: %s", file_path)
 
-    def submit(self, timeout: int):
-        from selenium.common.exceptions import TimeoutException
+    def wait_until_submission_allowed(
+        self, timeout: int, poll_interval: float
+    ) -> None:
+        """Wait until the upload form appears after a platform cooldown."""
+
+        from selenium.common.exceptions import (
+            StaleElementReferenceException,
+            TimeoutException,
+            WebDriverException,
+        )
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.support.ui import WebDriverWait
+
+        forms = self.driver.find_elements(
+            By.CSS_SELECTOR, self.selectors.file_input
+        )
+        if forms:
+            get_logger().info("Форма отправки доступна; кулдаун отсутствует")
+            return
+
+        alerts = (
+            self.driver.find_elements(
+                By.CSS_SELECTOR, self.selectors.cooldown_alert
+            )
+            if self.selectors.cooldown_alert
+            else []
+        )
+        remaining_text = None
+        if alerts and self.selectors.cooldown_timer:
+            timers = self.driver.find_elements(
+                By.CSS_SELECTOR, self.selectors.cooldown_timer
+            )
+            if timers:
+                remaining_text = timers[0].text.strip() or None
+        until = alerts[0].get_attribute("data-until") if alerts else None
+        remaining_seconds = None
+        try:
+            remaining_seconds = max(0, int(float(until) - time.time() + 0.999))
+        except (TypeError, ValueError):
+            pass
+
+        shown_remaining = (
+            f"{remaining_seconds} с"
+            if remaining_seconds is not None
+            else remaining_text or "неизвестно"
+        )
+        if alerts:
+            get_logger().info(
+                "Активен кулдаун отправки: осталось %s; ждём появления формы",
+                shown_remaining,
+            )
+            print(
+                f"Активен кулдаун платформы, осталось {shown_remaining}. "
+                "Ожидаю форму отправки...",
+                file=sys.stderr,
+                flush=True,
+            )
+        else:
+            get_logger().warning(
+                "Форма отправки отсутствует без предупреждения о кулдауне"
+            )
+            print(
+                "Форма отправки пока отсутствует. Ожидаю...",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        def submission_form_appeared(driver) -> bool:
+            try:
+                return bool(
+                    driver.find_elements(
+                        By.CSS_SELECTOR, self.selectors.file_input
+                    )
+                )
+            except (StaleElementReferenceException, WebDriverException):
+                # Во время location.reload старый document отсоединяется.
+                return False
+
+        try:
+            WebDriverWait(
+                self.driver, timeout, poll_frequency=poll_interval
+            ).until(
+                submission_form_appeared
+            )
+        except TimeoutException as error:
+            raise PlatformSubmissionError(
+                f"Форма отправки не появилась за {timeout} секунд. "
+                "Возможно, страница не перезагрузилась или платформа "
+                "продлила блокировку"
+            ) from error
+        get_logger().info("Форма появилась; отправка доступна")
+
+    def submit(self, timeout: int, post_click_delay: float):
+        from selenium.common.exceptions import TimeoutException, WebDriverException
         from selenium.webdriver.common.by import By
         from selenium.webdriver.support import expected_conditions as conditions
         from selenium.webdriver.support.ui import WebDriverWait
@@ -199,7 +292,30 @@ class SubmissionPage:
             ) from error
         previous_url = self.driver.current_url
         previous_result = self._read_latest_result()
-        button.click()
+        try:
+            button.click()
+        except WebDriverException as error:
+            # Chrome иногда сообщает об отсоединённом frame уже после того, как
+            # POST был принят. В этом случае продолжаем и проверяем таблицу.
+            message = str(error).lower()
+            transient_navigation_error = (
+                "target frame detached" in message
+                or "unable to receive message from renderer" in message
+            )
+            if not transient_navigation_error:
+                raise
+            get_logger().warning(
+                "Chrome отсоединил старый document после клика; "
+                "продолжаем ожидать результат"
+            )
+        finally:
+            # Пауза гарантированно начинается непосредственно после попытки
+            # клика, даже если Chrome вернул ошибку во время POST-навигации.
+            get_logger().info(
+                "После отправки ждём %.1f секунды перед проверкой результата",
+                post_click_delay,
+            )
+            time.sleep(post_click_delay)
         get_logger().info("Нажата кнопка отправки submission")
         return previous_url, previous_result, button
 
@@ -224,6 +340,9 @@ class SubmissionPage:
                 failure = self._failure_message()
                 if failure:
                     raise PlatformSubmissionError(failure)
+                latest = self._read_latest_result()
+                if latest is not None and latest != previous_result:
+                    return True
                 if self.selectors.success_marker and driver.find_elements(
                     By.CSS_SELECTOR, self.selectors.success_marker
                 ):
@@ -249,11 +368,17 @@ class SubmissionPage:
                 "результат за отведённое время"
             ) from error
 
-        WebDriverWait(self.driver, timeout).until(
-            lambda driver: driver.execute_script("return document.readyState")
-            == "complete"
+        def document_is_ready(driver) -> bool:
+            try:
+                return (
+                    driver.execute_script("return document.readyState") == "complete"
+                )
+            except WebDriverException:
+                return False
+
+        WebDriverWait(self.driver, timeout, poll_frequency=0.25).until(
+            document_is_ready
         )
-        time.sleep(settle_delay)
         failure = self._failure_message()
         if failure:
             raise PlatformSubmissionError(failure)

@@ -19,9 +19,26 @@ class TabularGapModel(GapModel):
     def _create_estimator(self):
         raise NotImplementedError
 
+    def _residual_column(self) -> str:
+        return {
+            "neighbor_mean": "baseline",
+            "linear": "linear",
+        }[self.training.residual_baseline]
+
     def fit(self, train: pd.DataFrame, features: FeatureBuilder) -> "TabularGapModel":
         self.estimator = self._create_estimator()
         matrix, target = features.build_training_set(train)
+        if self.training.target_mode == "residual":
+            baseline = pd.to_numeric(
+                matrix[self._residual_column()], errors="coerce"
+            )
+            usable = baseline.notna() & np.isfinite(baseline)
+            if not usable.any():
+                raise ValueError(
+                    "Не удалось рассчитать baseline ни для одной обучающей строки"
+                )
+            matrix = matrix.loc[usable]
+            target = target.loc[usable] - baseline.loc[usable]
         self.estimator.fit(matrix, target)
         return self
 
@@ -35,11 +52,25 @@ class TabularGapModel(GapModel):
             raise RuntimeError(f"Модель {self.name!r} не обучена")
         matrix, base = features.build_prediction_set(context, targets)
         result = base.copy()
-        prediction = np.asarray(self.estimator.predict(matrix), dtype=float)
+        model_output = np.asarray(self.estimator.predict(matrix), dtype=float)
+        if self.training.target_mode == "residual":
+            baseline = pd.to_numeric(
+                matrix[self._residual_column()], errors="coerce"
+            ).to_numpy(float)
+            prediction = baseline + model_output
+            prediction[~np.isfinite(baseline)] = np.nan
+        else:
+            prediction = model_output
         invalid = ~np.isfinite(prediction)
         prediction[invalid] = result.loc[invalid, "prediction"]
         result["prediction"] = prediction
         result["model"] = self.name
+        result["target_mode"] = self.training.target_mode
+        result["residual_baseline"] = (
+            self.training.residual_baseline
+            if self.training.target_mode == "residual"
+            else None
+        )
         return result
 
 

@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import csv
+from io import StringIO
 import json
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
 from pathlib import Path
 
-from api.config import ValidationConfig
+from api.config import SelectorConfig, ValidationConfig
 from api.credentials import CredentialsError, load_credentials
 from api.result import SubmissionReceipt, append_history, was_submitted
 from api.session import CookieStore
+from api.submission_page import SubmissionPage
 from api.validation import SubmissionValidationError, validate_submission_file
 
 
@@ -146,6 +149,68 @@ class CredentialsTests(unittest.TestCase):
             )
             with self.assertRaises(CredentialsError):
                 load_credentials(path)
+
+
+class SubmissionPageTests(unittest.TestCase):
+    @staticmethod
+    def make_page(driver, *, cooldown=False):
+        return SubmissionPage(
+            driver,
+            SelectorConfig(
+                file_input="#solution-file",
+                submit_button="#submit",
+                success_marker=None,
+                failure_marker=None,
+                submission_id=None,
+                score=None,
+                result_row="tbody tr:first-child",
+                cooldown_alert="#solution-blocked-alert" if cooldown else None,
+                cooldown_timer="#solution-blocked-timer" if cooldown else None,
+            ),
+        )
+
+    def test_submit_waits_four_seconds_immediately_after_click(self):
+        driver = Mock()
+        driver.current_url = "https://example.test/solution"
+        driver.find_elements.return_value = []
+        button = Mock()
+        page = self.make_page(driver)
+
+        with patch(
+            "selenium.webdriver.support.ui.WebDriverWait.until",
+            return_value=button,
+        ), patch("api.submission_page.time.sleep") as sleep:
+            page.submit(timeout=30, post_click_delay=4.0)
+
+        button.click.assert_called_once_with()
+        sleep.assert_called_once_with(4.0)
+
+    def test_active_cooldown_is_awaited_before_submission(self):
+        driver = Mock()
+        alert = Mock()
+        alert.get_attribute.return_value = "1060"
+        timer = Mock()
+        timer.text = "01:00"
+        form = Mock()
+        # Initial form lookup, alert, timer, then form after page reload.
+        driver.find_elements.side_effect = [[], [alert], [timer], [form]]
+        page = self.make_page(driver, cooldown=True)
+        wait = Mock()
+        wait.until.side_effect = lambda condition: condition(driver)
+
+        with patch(
+            "selenium.webdriver.support.ui.WebDriverWait", return_value=wait
+        ) as wait_class, patch(
+            "api.submission_page.time.time", return_value=1000
+        ), patch("api.submission_page.sys.stderr", new=StringIO()):
+            page.wait_until_submission_allowed(
+                timeout=90, poll_interval=1.0
+            )
+
+        wait_class.assert_called_once_with(
+            driver, 90, poll_frequency=1.0
+        )
+        self.assertEqual(driver.find_elements.call_count, 4)
 
 
 if __name__ == "__main__":

@@ -21,6 +21,8 @@ class BrowserConfig:
     settle_delay: float
     page_timeout: int
     login_timeout: int
+    cooldown_timeout: int
+    cooldown_poll_interval: float
     result_timeout: int
     result_settle_delay: float
     driver_log_path: Path
@@ -35,6 +37,8 @@ class SelectorConfig:
     submission_id: str | None
     score: str | None
     result_row: str
+    cooldown_alert: str | None = None
+    cooldown_timer: str | None = None
 
 
 @dataclass(frozen=True)
@@ -156,8 +160,12 @@ def load_submitter_config(path: Path) -> SubmitterConfig:
             settle_delay=float(browser_raw.get("settle_delay", 1.0)),
             page_timeout=int(browser_raw.get("page_timeout", 30)),
             login_timeout=int(browser_raw.get("login_timeout", 180)),
+            cooldown_timeout=int(browser_raw.get("cooldown_timeout", 90)),
+            cooldown_poll_interval=float(
+                browser_raw.get("cooldown_poll_interval", 1.0)
+            ),
             result_timeout=int(browser_raw.get("result_timeout", 180)),
-            result_settle_delay=float(browser_raw.get("result_settle_delay", 3.0)),
+            result_settle_delay=float(browser_raw.get("result_settle_delay", 4.0)),
             driver_log_path=_project_path(
                 project_root,
                 browser_raw.get(
@@ -201,6 +209,12 @@ def load_submitter_config(path: Path) -> SubmitterConfig:
             score=_optional_selector(selectors_raw, "score"),
             result_row=str(
                 _required(selectors_raw, "result_row", "selectors")
+            ),
+            cooldown_alert=_optional_selector(
+                selectors_raw, "cooldown_alert"
+            ),
+            cooldown_timer=_optional_selector(
+                selectors_raw, "cooldown_timer"
             ),
         ),
         validation=ValidationConfig(

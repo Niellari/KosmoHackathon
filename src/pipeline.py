@@ -51,7 +51,9 @@ class AnalysisPipeline:
         if cache and model_name in self._predictors:
             return self._predictors[model_name]
         models_config = self.config.models.model_copy(update={"selected": model_name})
-        predictor = PredictorService(models_config, self.config.features)
+        predictor = PredictorService(
+            models_config, self.config.features, self.config.training
+        )
         predictor.prepare(training_source)
         if cache:
             self._predictors[model_name] = predictor

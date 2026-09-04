@@ -16,24 +16,33 @@ os.environ.setdefault(
 import joblib
 import pandas as pd
 
-from src.config import FeaturesConfig, ModelsConfig
+from src.config import FeaturesConfig, ModelsConfig, TrainingConfig
 from src.features import FeatureBuilder
 from src.models import create_model
 from src.models.base import GapModel, ModelUnavailableError
 
 
 class PredictorService:
-    def __init__(self, models: ModelsConfig, features: FeaturesConfig):
+    def __init__(
+        self,
+        models: ModelsConfig,
+        features: FeaturesConfig,
+        training: TrainingConfig,
+    ):
         self.models_config = models
         self.feature_builder = FeatureBuilder(features)
+        self.training_config = training
         self.selected_name = models.selected
         self.definition = models.available[self.selected_name]
-        self.model: GapModel = create_model(self.selected_name, self.definition)
+        self.model: GapModel = create_model(
+            self.selected_name, self.definition, self.training_config
+        )
         self._prepared = False
 
     def _config_hash(self) -> str:
         payload = {
             "features": self.feature_builder.config.model_dump(mode="json"),
+            "training": self.training_config.model_dump(mode="json"),
             "type": self.definition.type,
             "params": self.definition.params,
         }
@@ -93,6 +102,7 @@ class PredictorService:
         metadata = {
             "model_name": self.selected_name,
             "model_type": self.definition.type,
+            "training": self.training_config.model_dump(mode="json"),
             "feature_names": self.feature_builder.feature_names,
             "config_hash": self._config_hash(),
             "data_signature": self._data_signature(train),
@@ -107,7 +117,9 @@ class PredictorService:
             raise RuntimeError("Fallback-модель не настроена")
         self.selected_name = fallback
         self.definition = self.models_config.available[fallback]
-        self.model = create_model(fallback, self.definition)
+        self.model = create_model(
+            fallback, self.definition, self.training_config
+        )
         print(f"Используется fallback-модель: {fallback}")
 
     def prepare(self, train: pd.DataFrame) -> "PredictorService":

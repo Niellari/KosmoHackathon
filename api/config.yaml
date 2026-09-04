@@ -13,8 +13,12 @@ browser:
   page_timeout: 30
   # В видимом браузере можно вручную войти в аккаунт при первом запуске.
   login_timeout: 180
+  # Платформа блокирует повторную отправку примерно на одну минуту.
+  cooldown_timeout: 90
+  cooldown_poll_interval: 1.0
   result_timeout: 180
-  result_settle_delay: 3.0
+  # Обязательная пауза сразу после клика по кнопке отправки.
+  result_settle_delay: 4.0
   driver_log_path: artifacts/submissions/logs/chromedriver.log
 
 authentication:
@@ -31,10 +35,14 @@ selectors:
   submit_button: "#save-solution-btn-metrika"
   # Отдельный маркер успеха не нужен: обычная HTML-форма перезагружает страницу.
   success_marker:
-  failure_marker: ".error-message, .alert, .alert-danger, .invalid-feedback"
+  # Жёлтый .alert-warning после успешного POST сообщает о новом кулдауне и
+  # не является ошибкой. Ошибками считаем только danger/invalid элементы.
+  failure_marker: ".error-message, .alert-danger, .invalid-feedback"
   submission_id:
   score:
   result_row: "tbody tr.team-row:first-child"
+  cooldown_alert: "#solution-blocked-alert"
+  cooldown_timer: "#solution-blocked-timer"
 
 validation:
   expected_columns:

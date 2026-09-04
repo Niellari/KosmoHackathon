@@ -65,6 +65,11 @@ class FeaturesConfig(StrictModel):
     crop_type: CropTypeConfig = CropTypeConfig()
 
 
+class TrainingConfig(StrictModel):
+    target_mode: Literal["direct", "residual"] = "direct"
+    residual_baseline: Literal["neighbor_mean", "linear"] = "linear"
+
+
 class ModelDefinition(StrictModel):
     type: Literal[
         "baseline", "heuristic_ensemble", "lightgbm", "catboost", "random_forest"
@@ -113,10 +118,28 @@ class ServerConfig(StrictModel):
 class AppConfig(StrictModel):
     data: DataConfig = DataConfig()
     features: FeaturesConfig = FeaturesConfig()
+    training: TrainingConfig = TrainingConfig()
     models: ModelsConfig
     predict: PredictConfig = PredictConfig()
     validation: ValidationConfig = ValidationConfig()
     server: ServerConfig = ServerConfig()
+
+    @model_validator(mode="after")
+    def residual_baseline_is_enabled(self) -> "AppConfig":
+        if self.training.target_mode != "residual":
+            return self
+        baseline = self.training.residual_baseline
+        if baseline == "linear" and not self.features.interpolation.linear:
+            raise ValueError(
+                "training.residual_baseline=linear требует "
+                "features.interpolation.linear=true"
+            )
+        if baseline == "neighbor_mean" and not self.features.interpolation.baseline:
+            raise ValueError(
+                "training.residual_baseline=neighbor_mean требует "
+                "features.interpolation.baseline=true"
+            )
+        return self
 
 
 def load_config(path: Path | str = "config.yaml") -> AppConfig:
