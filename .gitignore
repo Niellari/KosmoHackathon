@@ -8,4 +8,5 @@ api/save_page/
 artifacts/*.csv
 artifacts/models/
 artifacts/submissions/
+artifacts/collection/
 !artifacts/.gitkeep

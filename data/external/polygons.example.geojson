@@ -1,0 +1,24 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "polygon_id": "EXT-RND-0001",
+        "crop_type": "неизвестно"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [40.3000, 46.8500],
+            [40.3100, 46.8500],
+            [40.3100, 46.8580],
+            [40.3000, 46.8580],
+            [40.3000, 46.8500]
+          ]
+        ]
+      }
+    }
+  ]
+}

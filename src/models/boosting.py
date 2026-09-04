@@ -11,6 +11,7 @@ import pandas as pd
 
 from src.features import FeatureBuilder
 from src.models.base import GapModel, ModelUnavailableError
+from src.training import TestLikeGapGenerator
 
 
 class TabularGapModel(GapModel):
@@ -25,9 +26,11 @@ class TabularGapModel(GapModel):
             "linear": "linear",
         }[self.training.residual_baseline]
 
-    def fit(self, train: pd.DataFrame, features: FeatureBuilder) -> "TabularGapModel":
+    def fit(
+        self, train: pd.DataFrame, features: FeatureBuilder
+    ) -> "TabularGapModel":
         self.estimator = self._create_estimator()
-        matrix, target = features.build_training_set(train)
+        matrix, target, sample_weight = self._build_training_data(train, features)
         if self.training.target_mode == "residual":
             baseline = pd.to_numeric(
                 matrix[self._residual_column()], errors="coerce"
@@ -39,8 +42,53 @@ class TabularGapModel(GapModel):
                 )
             matrix = matrix.loc[usable]
             target = target.loc[usable] - baseline.loc[usable]
-        self.estimator.fit(matrix, target)
+            sample_weight = sample_weight.loc[usable]
+        if np.allclose(sample_weight.to_numpy(float), 1.0):
+            self.estimator.fit(matrix, target)
+        elif self.name == "random_forest":
+            step_name = self.estimator.steps[-1][0]
+            self.estimator.fit(
+                matrix,
+                target,
+                **{f"{step_name}__sample_weight": sample_weight},
+            )
+        else:
+            self.estimator.fit(matrix, target, sample_weight=sample_weight)
         return self
+
+    @staticmethod
+    def _sample_weights(train: pd.DataFrame, indices: pd.Index) -> pd.Series:
+        if "_sample_weight" not in train.columns:
+            return pd.Series(1.0, index=indices, name="sample_weight")
+        return pd.to_numeric(
+            train.loc[indices, "_sample_weight"], errors="coerce"
+        ).fillna(1.0).astype(float).rename("sample_weight")
+
+    def _build_training_data(
+        self, train: pd.DataFrame, features: FeatureBuilder
+    ) -> tuple[pd.DataFrame, pd.Series, pd.Series]:
+        masking = self.training.gap_masking
+        if masking.strategy == "leave_one_out":
+            matrix, target = features.build_training_set(train)
+            return matrix, target, self._sample_weights(train, matrix.index)
+
+        matrices: list[pd.DataFrame] = []
+        targets: list[pd.Series] = []
+        weights: list[pd.Series] = []
+        for batch in TestLikeGapGenerator(masking).generate(train):
+            matrix, _ = features.build_prediction_set(batch.context, batch.targets)
+            weights.append(
+                self._sample_weights(train, matrix.index).reset_index(drop=True)
+            )
+            matrices.append(matrix.reset_index(drop=True))
+            targets.append(batch.truth.reindex(matrix.index).reset_index(drop=True))
+        if not matrices:
+            raise ValueError("Генератор test-like пропусков не создал обучающих строк")
+        return (
+            pd.concat(matrices, ignore_index=True),
+            pd.concat(targets, ignore_index=True).rename("primary_ndvi"),
+            pd.concat(weights, ignore_index=True).rename("sample_weight"),
+        )
 
     def predict(
         self,

@@ -1,8 +1,18 @@
 data:
   train_path: data/train_dataset.csv
   test_path: data/test_dataset.csv
+  external:
+    # До положительного A/B-теста production/submission остаётся без external.
+    enabled: false
+    paths:
+      - data/external/processed/external_dataset.csv
+    usage: training_only
+    crop_type_fallback: неизвестно
+    polygon_id_prefix: EXT-
+    sample_weight: 0.25
 
 features:
+
   neighbors:
     enabled: true
     count: 2
@@ -10,30 +20,56 @@ features:
   interpolation:
     baseline: true
     linear: true
+    pchip: true
+    local_quadratic: false
+    differences: false
+    agreement: false
+
   polygon_history:
     enabled: true
     doy_window: 21
     weighting_scale: 7.0
     include_std: true
     include_reference_years: true
+
   crop_curve:
     enabled: true
     doy_window: 7
     weighting_scale: 3.0
     aggregation: median
+
   calendar:
     enabled: true
     include_doy: true
     cyclic_encoding: true
     include_year: true
+
   crop_type:
     enabled: true
     encoding: one_hot
+
+  temporal_dynamics:
+    enabled: true
+    gap_geometry: true
+    slopes: true
+    acceleration: true
+    local_statistics: true
 
 training:
   # residual доступен, но direct пока показывает лучший локальный RMSE.
   target_mode: direct
   residual_baseline: linear
+  gap_masking:
+    strategy: leave_one_out
+    target_fraction: 0.15
+    replicas: 5
+    block_length_weights:
+      1: 0.922
+      2: 0.070
+      3: 0.007
+      4: 0.0005
+      5: 0.0005
+    random_state: 42
 
 models:
   selected: lightgbm
@@ -93,6 +129,10 @@ predict:
 validation:
   sample_size: 3000
   seed: 42
+  evaluation_source: competition_only
+  external_ab:
+    seeds: [17, 42, 73]
+    disable_crop_features: true
 
 server:
   host: 127.0.0.1

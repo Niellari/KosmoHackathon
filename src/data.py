@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
+
+if TYPE_CHECKING:
+    from src.config import ExternalDataConfig
 
 
 REQUIRED_COMMON_COLUMNS = {
@@ -68,3 +72,59 @@ def combine_context(current: pd.DataFrame, reference: pd.DataFrame | None) -> pd
         ["anon_polygon_id", "date"], keep="last"
     )
     return combined.sort_values(["anon_polygon_id", "date"]).reset_index(drop=True)
+
+
+def load_external_training_data(
+    config: "ExternalDataConfig", *, include_when_disabled: bool = False
+) -> pd.DataFrame | None:
+    """Загружает проверенные external-файлы, не смешивая их с context."""
+
+    if not config.enabled and not include_when_disabled:
+        return None
+    if not config.paths:
+        raise ValueError("Для external data не задан ни один путь")
+
+    frames: list[pd.DataFrame] = []
+    for path in config.paths:
+        frame = load_dataset(path)
+        invalid_ids = ~frame["anon_polygon_id"].str.startswith(
+            config.polygon_id_prefix
+        )
+        if invalid_ids.any():
+            example = frame.loc[invalid_ids, "anon_polygon_id"].iloc[0]
+            raise ValueError(
+                f"External polygon ID {example!r} не начинается с "
+                f"{config.polygon_id_prefix!r}"
+            )
+        missing_crop = frame["crop_type"].isin(["", "nan", "None"])
+        frame.loc[missing_crop, "crop_type"] = config.crop_type_fallback
+        frame["_data_source"] = f"external:{path.name}"
+        frame["_sample_weight"] = config.sample_weight
+        frames.append(frame)
+
+    combined = pd.concat(frames, ignore_index=True, sort=False)
+    if combined.duplicated(["anon_polygon_id", "date"]).any():
+        raise ValueError("External-файлы содержат повторяющиеся polygon ID + date")
+    return combined.sort_values(["anon_polygon_id", "date"]).reset_index(drop=True)
+
+
+def combine_training_sources(
+    competition: pd.DataFrame, external: pd.DataFrame | None
+) -> pd.DataFrame:
+    """Объединяет источники только для обучения и назначает веса строк."""
+
+    primary = competition.copy()
+    primary["_data_source"] = "competition"
+    primary["_sample_weight"] = 1.0
+    if external is None or external.empty:
+        return primary
+
+    overlap = set(primary["anon_polygon_id"]) & set(external["anon_polygon_id"])
+    if overlap:
+        example = sorted(overlap)[0]
+        raise ValueError(f"External polygon ID пересекается с train: {example}")
+    columns = sorted(set(primary.columns) | set(external.columns))
+    return pd.concat(
+        [primary.reindex(columns=columns), external.reindex(columns=columns)],
+        ignore_index=True,
+    ).sort_values(["anon_polygon_id", "date"]).reset_index(drop=True)

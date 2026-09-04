@@ -52,12 +52,31 @@ class PredictorService:
     @staticmethod
     def _data_signature(frame: pd.DataFrame) -> dict:
         known = pd.to_numeric(frame["primary_ndvi"], errors="coerce")
+        signature_columns = [
+            column
+            for column in (
+                "anon_polygon_id",
+                "date",
+                "primary_ndvi",
+                "crop_type",
+                "ndvi_climatology_mean",
+                "ndvi_climatology_std",
+                "n_reference_years",
+                "_data_source",
+                "_sample_weight",
+            )
+            if column in frame.columns
+        ]
+        row_hashes = pd.util.hash_pandas_object(
+            frame[signature_columns], index=False
+        ).to_numpy()
         return {
             "rows": len(frame),
             "known_targets": int(known.notna().sum()),
             "target_sum": round(float(known.sum()), 8),
             "date_min": str(frame["date"].min()),
             "date_max": str(frame["date"].max()),
+            "content_sha256": hashlib.sha256(row_hashes.tobytes()).hexdigest(),
         }
 
     def _metadata_path(self, artifact: Path) -> Path:

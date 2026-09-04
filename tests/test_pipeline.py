@@ -9,9 +9,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.data import load_dataset
+from src.data import combine_context, load_dataset
 from src.config import load_config, select_model
-from src.interpolation import GapInterpolator
+from src.interpolation import GapInterpolator, local_quadratic_value, pchip_value
 from src.pipeline import AnalysisPipeline
 from src.submission import validate_submission
 
@@ -43,8 +43,50 @@ class DataTests(unittest.TestCase):
         self.assertEqual(int(loaded.loc[0, "year"]), 2024)
         self.assertEqual(int(loaded.loc[0, "doy"]), 94)
 
+    def test_external_rows_are_training_only(self):
+        current = sample_frame()
+        reference = sample_frame().copy()
+        reference["anon_polygon_id"] = "AOI-REF"
+        external = sample_frame().copy()
+        external["anon_polygon_id"] = "EXT-1"
+        external["_sample_weight"] = 0.25
+        pipeline = AnalysisPipeline(
+            current, reference=reference, training_extra=external
+        )
+
+        context = combine_context(pipeline.data, pipeline.reference)
+        training = pipeline._training_source(pipeline.reference)
+
+        self.assertNotIn("EXT-1", set(context["anon_polygon_id"]))
+        self.assertIn("EXT-1", set(training["anon_polygon_id"]))
+        weight = training.loc[
+            training["anon_polygon_id"] == "EXT-1", "_sample_weight"
+        ]
+        self.assertTrue((weight == 0.25).all())
+
 
 class InterpolationTests(unittest.TestCase):
+    def test_pchip_preserves_monotonic_local_shape(self):
+        points = [(-2, 0.2), (-1, 0.4), (1, 0.65), (2, 0.7)]
+
+        prediction = pchip_value(points)
+
+        self.assertGreaterEqual(prediction, 0.4)
+        self.assertLessEqual(prediction, 0.65)
+
+    def test_quadratic_recovers_local_peak(self):
+        points = [(-2, 0.2), (-1, 0.5), (1, 0.5), (2, 0.2)]
+
+        prediction = local_quadratic_value(points)
+
+        self.assertAlmostEqual(prediction, 0.6)
+
+    def test_interpolators_require_points_on_both_sides(self):
+        points = [(-3, 0.2), (-1, 0.4)]
+
+        self.assertTrue(np.isnan(pchip_value(points)))
+        self.assertTrue(np.isnan(local_quadratic_value(points)))
+
     def test_consecutive_gaps_use_surrounding_observations(self):
         frame = sample_frame()
         targets = frame.iloc[1:3]

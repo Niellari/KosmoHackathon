@@ -9,7 +9,13 @@ import pandas as pd
 
 from src.anomalies import detect_anomalies
 from src.config import AppConfig, load_config
-from src.data import clean_primary_series, combine_context, load_dataset
+from src.data import (
+    clean_primary_series,
+    combine_context,
+    combine_training_sources,
+    load_dataset,
+    load_external_training_data,
+)
 from src.predictor import PredictorService
 
 
@@ -18,11 +24,15 @@ class AnalysisPipeline:
         self,
         data: pd.DataFrame,
         reference: pd.DataFrame | None = None,
+        training_extra: pd.DataFrame | None = None,
         config: AppConfig | None = None,
     ):
         self.data = data.copy()
         self.data["primary_ndvi"] = clean_primary_series(self.data["primary_ndvi"])
         self.reference = None if reference is None else reference.copy()
+        self.training_extra = (
+            None if training_extra is None else training_extra.copy()
+        )
         self.config = config or load_config()
         self._predictors: dict[str, PredictorService] = {}
 
@@ -35,7 +45,17 @@ class AnalysisPipeline:
     ) -> "AnalysisPipeline":
         data = load_dataset(data_path)
         reference = load_dataset(reference_path) if reference_path else None
-        return cls(data, reference, config=config)
+        active_config = config or load_config()
+        training_extra = load_external_training_data(active_config.data.external)
+        return cls(
+            data,
+            reference,
+            training_extra=training_extra,
+            config=active_config,
+        )
+
+    def _training_source(self, primary: pd.DataFrame) -> pd.DataFrame:
+        return combine_training_sources(primary, self.training_extra)
 
     def _model_name(self, requested: str | None) -> str:
         if requested in (None, "ml"):
@@ -63,7 +83,8 @@ class AnalysisPipeline:
         """Загружает или обучает выбранную модель один раз при старте приложения."""
 
         selected = self._model_name(model_name)
-        training_source = self.reference if self.reference is not None else self.data
+        primary = self.reference if self.reference is not None else self.data
+        training_source = self._training_source(primary)
         predictor = self._create_predictor(
             selected, training_source, cache=self.reference is not None
         )
@@ -81,7 +102,8 @@ class AnalysisPipeline:
         current = self.data.copy()
         current.loc[target_mask, "primary_ndvi"] = np.nan
         context = combine_context(current, self.reference)
-        training_source = self.reference if self.reference is not None else current
+        primary = self.reference if self.reference is not None else current
+        training_source = self._training_source(primary)
         model_name = self._model_name(method)
         predictor = self._create_predictor(
             model_name,

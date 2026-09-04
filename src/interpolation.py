@@ -6,6 +6,63 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
+from scipy.interpolate import PchipInterpolator
+
+
+NDVI_MIN = -1.0
+NDVI_MAX = 1.0
+
+
+def _valid_local_points(
+    points: list[tuple[float, float]],
+) -> tuple[np.ndarray, np.ndarray]:
+    """Очищает и сортирует локальные точки вокруг даты прогноза."""
+
+    valid = [
+        (float(day), float(value))
+        for day, value in points
+        if np.isfinite(day)
+        and np.isfinite(value)
+        and NDVI_MIN <= value <= NDVI_MAX
+    ]
+    if not valid:
+        return np.array([], dtype=float), np.array([], dtype=float)
+    valid.sort(key=lambda item: item[0])
+    x = np.asarray([item[0] for item in valid], dtype=float)
+    y = np.asarray([item[1] for item in valid], dtype=float)
+    unique = np.r_[True, np.diff(x) > 0]
+    return x[unique], y[unique]
+
+
+def pchip_value(points: list[tuple[float, float]]) -> float:
+    """Интерполирует значение в дате x=0 монотонным кубическим PCHIP."""
+
+    x, y = _valid_local_points(points)
+    if len(x) < 2 or x[0] >= 0 or x[-1] <= 0:
+        return np.nan
+    try:
+        value = float(PchipInterpolator(x, y, extrapolate=False)(0.0))
+    except ValueError:
+        return np.nan
+    return float(np.clip(value, NDVI_MIN, NDVI_MAX)) if np.isfinite(value) else np.nan
+
+
+def local_quadratic_value(points: list[tuple[float, float]]) -> float:
+    """Аппроксимирует локальный изгиб параболой с защитой от overshoot."""
+
+    x, y = _valid_local_points(points)
+    if len(x) < 3 or x[0] >= 0 or x[-1] <= 0:
+        return np.nan
+    scale = float(np.max(np.abs(x)))
+    if not np.isfinite(scale) or scale <= 0:
+        return np.nan
+    coefficients = np.polyfit(x / scale, y, deg=2)
+    value = float(np.polyval(coefficients, 0.0))
+    local_range = float(np.max(y) - np.min(y))
+    margin = max(0.10, 0.50 * local_range)
+    lower = max(NDVI_MIN, float(np.min(y)) - margin)
+    upper = min(NDVI_MAX, float(np.max(y)) + margin)
+    return float(np.clip(value, lower, upper)) if np.isfinite(value) else np.nan
 
 
 @dataclass(frozen=True)

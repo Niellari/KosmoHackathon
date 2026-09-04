@@ -21,6 +21,11 @@ def build_parser() -> argparse.ArgumentParser:
     predict.add_argument("--output")
     predict.add_argument("--model", help="Имя модели из models.available")
     predict.add_argument(
+        "--with-external",
+        action="store_true",
+        help="Обучить экспериментальную модель с data.external",
+    )
+    predict.add_argument(
         "--target-column",
         default=None,
         help="Имя целевой колонки, ожидаемое платформой",
@@ -54,11 +59,69 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("--sample-size", type=int)
     validate.add_argument("--seed", type=int)
 
+    validate_external = subparsers.add_parser(
+        "validate-external",
+        help="Сравнить обучение с external data и без них",
+    )
+    validate_external.add_argument("--config", default="config.yaml")
+    validate_external.add_argument("--train")
+    validate_external.add_argument("--model", help="Имя модели из models.available")
+    validate_external.add_argument("--sample-size", type=int)
+    validate_external.add_argument("--seeds", type=int, nargs="+")
+
+    collect = subparsers.add_parser(
+        "collect", help="Собрать внешние спутниковые наблюдения"
+    )
+    collect.add_argument("--config", default="configs/collection-pilot.yaml")
+    collect.add_argument(
+        "--sensor", choices=("sentinel2",), default="sentinel2"
+    )
+    collect.add_argument("--start", help="Начало периода YYYY-MM-DD")
+    collect.add_argument("--end", help="Конец периода YYYY-MM-DD")
+    collect.add_argument("--limit", type=int, help="Ограничение числа полигонов")
+    collect.add_argument("--output", help="Путь к raw CSV")
+    collect.add_argument(
+        "--force", action="store_true", help="Перезаписать существующий сбор"
+    )
+
+    discover = subparsers.add_parser(
+        "discover-fields", help="Найти открытые контуры сельхозполей"
+    )
+    discover.add_argument("--config", default="configs/collection-pilot.yaml")
+    discover.add_argument("--limit", type=int, help="Количество полигонов")
+    discover.add_argument("--output", help="Путь к GeoJSON")
+    discover.add_argument(
+        "--force", action="store_true", help="Перезаписать существующий GeoJSON"
+    )
+
+    prepare_external = subparsers.add_parser(
+        "prepare-external", help="Собрать нормализованный внешний датасет"
+    )
+    prepare_external.add_argument("--config", default="configs/collection-pilot.yaml")
+    prepare_external.add_argument("--sentinel2", help="Путь к raw Sentinel-2 CSV")
+    prepare_external.add_argument("--output", help="Путь к итоговому CSV")
+
     return parser
 
 
 def main() -> None:
     args = build_parser().parse_args()
+    if args.command == "prepare-external":
+        from src.collection.prepare import run_prepare_external_command
+
+        run_prepare_external_command(args)
+        return
+    if args.command == "discover-fields":
+        from src.collection.osm_fields import run_discover_fields_command
+
+        run_discover_fields_command(args)
+        return
+    if args.command == "collect":
+        from src.collection.runner import run_collect_command
+
+        run_collect_command(args)
+        return
+
     config = load_config(args.config)
 
     requested_model = getattr(args, "model", None)
@@ -74,6 +137,10 @@ def main() -> None:
     config = select_model(config, requested_model)
 
     if args.command == "predict":
+        if args.with_external:
+            from src.external_validation import external_experiment_config
+
+            config = external_experiment_config(config)
         input_path = Path(args.input) if args.input else config.data.test_path
         train_path = Path(args.train) if args.train else config.data.train_path
         output_path = Path(args.output) if args.output else config.predict.output_path
@@ -110,6 +177,32 @@ def main() -> None:
         )
         print(f"Baseline RMSE: {metrics['baseline_rmse']:.6f}")
         print(f"{metrics['model']} RMSE: {metrics['model_rmse']:.6f}")
+        return
+
+    if args.command == "validate-external":
+        from src.external_validation import validate_external_ab
+
+        train_path = Path(args.train) if args.train else config.data.train_path
+        sample_size = args.sample_size or config.validation.sample_size
+        seeds = args.seeds or config.validation.external_ab.seeds
+        result = validate_external_ab(
+            train_path=train_path,
+            config=config,
+            model_name=config.models.selected,
+            sample_size=sample_size,
+            seeds=seeds,
+        )
+        for run in result["runs"]:
+            print(
+                f"seed={run['seed']}: без external={run['base_rmse']:.6f}, "
+                f"с external={run['external_rmse']:.6f}, "
+                f"изменение={run['change_percent']:+.3f}%"
+            )
+        print(
+            f"Средний RMSE: без external={result['base_rmse_mean']:.6f}, "
+            f"с external={result['external_rmse_mean']:.6f}, "
+            f"изменение={result['change_percent']:+.3f}%"
+        )
         return
 
     if args.command == "serve":

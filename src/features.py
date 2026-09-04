@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from src.config import FeaturesConfig
-from src.interpolation import GapInterpolator
+from src.interpolation import GapInterpolator, local_quadratic_value, pchip_value
 
 
 CROP_COLUMNS = {
@@ -51,6 +51,28 @@ class FeatureBuilder:
             result.append("baseline")
         if self.config.interpolation.linear:
             result.append("linear")
+        if self.config.interpolation.pchip:
+            result.append("pchip_prediction")
+        if self.config.interpolation.local_quadratic:
+            result.append("local_quadratic_prediction")
+        if self.config.interpolation.differences:
+            if self.config.interpolation.pchip and self.config.interpolation.linear:
+                result.append("pchip_minus_linear")
+            if (
+                self.config.interpolation.local_quadratic
+                and self.config.interpolation.linear
+            ):
+                result.append("quadratic_minus_linear")
+            if self.config.interpolation.linear and self.config.interpolation.baseline:
+                result.append("linear_minus_neighbor_mean")
+        if self.config.interpolation.agreement:
+            result.extend(
+                [
+                    "interpolation_mean",
+                    "interpolation_std",
+                    "interpolation_range",
+                ]
+            )
         if self.config.polygon_history.enabled:
             result.append("historical")
             if self.config.polygon_history.include_std:
@@ -68,6 +90,35 @@ class FeatureBuilder:
                 result.append("year_offset")
         if self.config.crop_type.enabled:
             result.extend(CROP_COLUMNS.values())
+        dynamics = self.config.temporal_dynamics
+        if dynamics.enabled:
+            if dynamics.gap_geometry:
+                result.extend(
+                    ["gap_span_days", "gap_position", "neighbor_asymmetry"]
+                )
+            if dynamics.slopes:
+                result.extend(
+                    [
+                        "previous_interval_days",
+                        "next_interval_days",
+                        "slope_before",
+                        "slope_after",
+                        "slope_between",
+                        "slope_change",
+                    ]
+                )
+            if dynamics.acceleration:
+                result.append("local_acceleration")
+            if dynamics.local_statistics:
+                result.extend(
+                    [
+                        "neighbor_mean",
+                        "neighbor_std",
+                        "neighbor_min",
+                        "neighbor_max",
+                        "neighbor_range",
+                    ]
+                )
         if not result:
             raise ValueError("В конфигурации отключены все признаки")
         return result
@@ -102,6 +153,171 @@ class FeatureBuilder:
         for label, column in CROP_COLUMNS.items():
             record[column] = float(crop_type == label)
 
+    def _temporal_features(
+        self,
+        record: dict,
+        previous_1: float,
+        next_1: float,
+        previous_2: float,
+        next_2: float,
+        previous_days: float,
+        next_days: float,
+        previous_2_days: float,
+        next_2_days: float,
+    ) -> None:
+        gap_span = (
+            previous_days + next_days
+            if np.isfinite(previous_days) and np.isfinite(next_days)
+            else np.nan
+        )
+        record["gap_span_days"] = gap_span
+        record["gap_position"] = (
+            previous_days / gap_span
+            if np.isfinite(gap_span) and gap_span > 0
+            else np.nan
+        )
+        record["neighbor_asymmetry"] = (
+            (previous_days - next_days) / gap_span
+            if np.isfinite(gap_span) and gap_span > 0
+            else np.nan
+        )
+
+        previous_interval = (
+            previous_2_days - previous_days
+            if np.isfinite(previous_2_days) and np.isfinite(previous_days)
+            else np.nan
+        )
+        next_interval = (
+            next_2_days - next_days
+            if np.isfinite(next_2_days) and np.isfinite(next_days)
+            else np.nan
+        )
+        record["previous_interval_days"] = previous_interval
+        record["next_interval_days"] = next_interval
+        slope_before = (
+            (previous_1 - previous_2) / previous_interval
+            if np.isfinite(previous_1)
+            and np.isfinite(previous_2)
+            and np.isfinite(previous_interval)
+            and previous_interval > 0
+            else np.nan
+        )
+        slope_after = (
+            (next_2 - next_1) / next_interval
+            if np.isfinite(next_1)
+            and np.isfinite(next_2)
+            and np.isfinite(next_interval)
+            and next_interval > 0
+            else np.nan
+        )
+        slope_between = (
+            (next_1 - previous_1) / gap_span
+            if np.isfinite(previous_1)
+            and np.isfinite(next_1)
+            and np.isfinite(gap_span)
+            and gap_span > 0
+            else np.nan
+        )
+        record["slope_before"] = slope_before
+        record["slope_after"] = slope_after
+        record["slope_between"] = slope_between
+        record["slope_change"] = (
+            slope_after - slope_before
+            if np.isfinite(slope_before) and np.isfinite(slope_after)
+            else np.nan
+        )
+        local_span = previous_interval + next_interval
+        record["local_acceleration"] = (
+            2.0 * (slope_after - slope_before) / local_span
+            if np.isfinite(slope_before)
+            and np.isfinite(slope_after)
+            and np.isfinite(local_span)
+            and local_span > 0
+            else np.nan
+        )
+
+        neighbors = np.array(
+            [previous_2, previous_1, next_1, next_2], dtype=float
+        )
+        neighbors = neighbors[np.isfinite(neighbors)]
+        record["neighbor_mean"] = (
+            float(neighbors.mean()) if len(neighbors) else np.nan
+        )
+        record["neighbor_std"] = (
+            float(neighbors.std()) if len(neighbors) else np.nan
+        )
+        record["neighbor_min"] = (
+            float(neighbors.min()) if len(neighbors) else np.nan
+        )
+        record["neighbor_max"] = (
+            float(neighbors.max()) if len(neighbors) else np.nan
+        )
+        record["neighbor_range"] = (
+            float(neighbors.max() - neighbors.min()) if len(neighbors) else np.nan
+        )
+
+    def _interpolation_features(
+        self,
+        record: dict,
+        previous_1: float,
+        next_1: float,
+        previous_2: float,
+        next_2: float,
+        previous_days: float,
+        next_days: float,
+        previous_2_days: float,
+        next_2_days: float,
+    ) -> None:
+        points = [
+            (-previous_2_days, previous_2),
+            (-previous_days, previous_1),
+            (next_days, next_1),
+            (next_2_days, next_2),
+        ]
+        pchip = pchip_value(points)
+        quadratic = local_quadratic_value(points)
+        linear = float(record.get("linear", np.nan))
+        neighbor_mean = float(record.get("baseline", np.nan))
+        record["pchip_prediction"] = pchip
+        record["local_quadratic_prediction"] = quadratic
+        record["pchip_minus_linear"] = (
+            pchip - linear
+            if np.isfinite(pchip) and np.isfinite(linear)
+            else np.nan
+        )
+        record["quadratic_minus_linear"] = (
+            quadratic - linear
+            if np.isfinite(quadratic) and np.isfinite(linear)
+            else np.nan
+        )
+        record["linear_minus_neighbor_mean"] = (
+            linear - neighbor_mean
+            if np.isfinite(linear) and np.isfinite(neighbor_mean)
+            else np.nan
+        )
+        configured_candidates: list[float] = []
+        if self.config.interpolation.baseline:
+            configured_candidates.append(neighbor_mean)
+        if self.config.interpolation.linear:
+            configured_candidates.append(linear)
+        if self.config.interpolation.pchip:
+            configured_candidates.append(pchip)
+        if self.config.interpolation.local_quadratic:
+            configured_candidates.append(quadratic)
+        candidates = np.asarray(configured_candidates, dtype=float)
+        candidates = candidates[np.isfinite(candidates)]
+        record["interpolation_mean"] = (
+            float(candidates.mean()) if len(candidates) else np.nan
+        )
+        record["interpolation_std"] = (
+            float(candidates.std()) if len(candidates) else np.nan
+        )
+        record["interpolation_range"] = (
+            float(candidates.max() - candidates.min())
+            if len(candidates)
+            else np.nan
+        )
+
     def build_training_set(
         self, frame: pd.DataFrame
     ) -> tuple[pd.DataFrame, pd.Series]:
@@ -131,6 +347,16 @@ class FeatureBuilder:
                     if position + 1 < len(days)
                     else np.nan
                 )
+                previous_2_days = (
+                    days[position] - days[position - 2]
+                    if position >= 2
+                    else np.nan
+                )
+                next_2_days = (
+                    days[position + 2] - days[position]
+                    if position + 2 < len(days)
+                    else np.nan
+                )
                 record = {
                     "previous_1": previous_1,
                     "next_1": next_1,
@@ -151,6 +377,28 @@ class FeatureBuilder:
                 }
                 self._calendar_features(
                     record, str(row["crop_type"]), int(row["doy"]), int(row["year"])
+                )
+                self._interpolation_features(
+                    record,
+                    previous_1,
+                    next_1,
+                    previous_2,
+                    next_2,
+                    previous_days,
+                    next_days,
+                    previous_2_days,
+                    next_2_days,
+                )
+                self._temporal_features(
+                    record,
+                    previous_1,
+                    next_1,
+                    previous_2,
+                    next_2,
+                    previous_days,
+                    next_days,
+                    previous_2_days,
+                    next_2_days,
                 )
                 records.append(record)
                 targets.append(float(row["primary_ndvi"]))
@@ -192,7 +440,6 @@ class FeatureBuilder:
             values = observed["primary_ndvi"].to_numpy(float)
             target_date = np.datetime64(row["date"])
             position = int(np.searchsorted(dates, target_date))
-
             previous_1 = values[position - 1] if position >= 1 else np.nan
             previous_2 = values[position - 2] if position >= 2 else np.nan
             next_1 = values[position] if position < len(values) else np.nan
@@ -205,6 +452,16 @@ class FeatureBuilder:
             next_days = (
                 float((dates[position] - target_date) / np.timedelta64(1, "D"))
                 if position < len(dates)
+                else np.nan
+            )
+            previous_2_days = (
+                float((target_date - dates[position - 2]) / np.timedelta64(1, "D"))
+                if position >= 2
+                else np.nan
+            )
+            next_2_days = (
+                float((dates[position + 1] - target_date) / np.timedelta64(1, "D"))
+                if position + 1 < len(dates)
                 else np.nan
             )
 
@@ -243,6 +500,28 @@ class FeatureBuilder:
             }
             self._calendar_features(
                 record, str(row["crop_type"]), int(row["doy"]), int(row["year"])
+            )
+            self._interpolation_features(
+                record,
+                previous_1,
+                next_1,
+                previous_2,
+                next_2,
+                previous_days,
+                next_days,
+                previous_2_days,
+                next_2_days,
+            )
+            self._temporal_features(
+                record,
+                previous_1,
+                next_1,
+                previous_2,
+                next_2,
+                previous_days,
+                next_days,
+                previous_2_days,
+                next_2_days,
             )
             records.append(record)
 
