@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 from bottle import Bottle, HTTPError, request, response, static_file
 
+from src.config import AppConfig
 from src.pipeline import AnalysisPipeline
 
 
@@ -32,13 +33,20 @@ def _json_value(value):
 @dataclass
 class AppState:
     pipeline: AnalysisPipeline
+    active_model: str
     custom_polygons: dict[str, dict] = field(default_factory=dict)
     lock: Lock = field(default_factory=Lock)
 
 
-def create_app(data_path: Path, train_path: Path | None = None) -> Bottle:
-    pipeline = AnalysisPipeline.from_csv(data_path, train_path)
-    state = AppState(pipeline=pipeline)
+def create_app(
+    data_path: Path,
+    train_path: Path | None = None,
+    config: AppConfig | None = None,
+) -> Bottle:
+    pipeline = AnalysisPipeline.from_csv(data_path, train_path, config=config)
+    active_model = pipeline.prepare_model()
+    print(f"Модель веб-сервиса: {active_model}")
+    state = AppState(pipeline=pipeline, active_model=active_model)
     app = Bottle()
     web_root = Path(__file__).resolve().parent.parent / "web"
 
@@ -57,7 +65,11 @@ def create_app(data_path: Path, train_path: Path | None = None) -> Bottle:
 
     @app.get("/api/health")
     def health():
-        return {"status": "ok", "rows": len(state.pipeline.data)}
+        return {
+            "status": "ok",
+            "rows": len(state.pipeline.data),
+            "model": state.active_model,
+        }
 
     @app.get("/api/meta")
     def meta():
@@ -194,9 +206,11 @@ def run_server(
     port: int,
     debug: bool = False,
     open_browser: bool = True,
+    auto_select_port: bool = True,
+    config: AppConfig | None = None,
 ) -> None:
-    app = create_app(data_path=data_path, train_path=train_path)
-    selected_port = find_available_port(host, port)
+    app = create_app(data_path=data_path, train_path=train_path, config=config)
+    selected_port = find_available_port(host, port) if auto_select_port else port
     if selected_port != port:
         print(f"Порт {port} занят; выбран свободный порт {selected_port}.")
     browser_host = "127.0.0.1" if host == "0.0.0.0" else host

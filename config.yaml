@@ -1,0 +1,97 @@
+data:
+  train_path: data/train_dataset.csv
+  test_path: data/test_dataset.csv
+
+features:
+  neighbors:
+    enabled: true
+    count: 2
+    include_distances: true
+  interpolation:
+    baseline: true
+    linear: true
+  polygon_history:
+    enabled: true
+    doy_window: 21
+    weighting_scale: 7.0
+    include_std: true
+    include_reference_years: true
+  crop_curve:
+    enabled: true
+    doy_window: 7
+    weighting_scale: 3.0
+    aggregation: median
+  calendar:
+    enabled: true
+    include_doy: true
+    cyclic_encoding: true
+    include_year: true
+  crop_type:
+    enabled: true
+    encoding: one_hot
+
+models:
+  selected: lightgbm
+  on_unavailable: fallback
+  fallback_to: ensemble
+  available:
+    baseline:
+      type: baseline
+      params:
+        method: neighbor_mean
+    ensemble:
+      type: heuristic_ensemble
+      params:
+        baseline_weight_near: 0.86
+        baseline_weight_far: 0.72
+        historical_weight: 0.22
+        crop_curve_weight: 0.06
+    lightgbm:
+      type: lightgbm
+      artifact_path: artifacts/models/lightgbm.joblib
+      load_if_exists: true
+      params:
+        n_estimators: 350
+        learning_rate: 0.035
+        num_leaves: 24
+        min_child_samples: 40
+        colsample_bytree: 0.9
+        reg_lambda: 2.0
+        verbosity: -1
+        random_state: 42
+    catboost:
+      type: catboost
+      artifact_path: artifacts/models/catboost.joblib
+      load_if_exists: true
+      params:
+        iterations: 500
+        depth: 7
+        learning_rate: 0.03
+        loss_function: RMSE
+        random_seed: 42
+        verbose: false
+    random_forest:
+      type: random_forest
+      artifact_path: artifacts/models/random_forest.joblib
+      load_if_exists: true
+      params:
+        n_estimators: 400
+        max_depth: 14
+        min_samples_leaf: 5
+        n_jobs: -1
+        random_state: 42
+
+predict:
+  output_path: artifacts/submission.csv
+  prediction_column: primary_ndvi_true
+
+validation:
+  sample_size: 3000
+  seed: 42
+
+server:
+  host: 127.0.0.1
+  port: 8000
+  auto_select_port: true
+  open_browser: true
+  debug: false

@@ -9,10 +9,11 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY main.py ./
+COPY config.yaml ./
 COPY src ./src
 COPY web ./web
 COPY data ./data
 
 EXPOSE 8000
 
-CMD ["python", "main.py", "serve", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "main.py", "serve", "--host", "0.0.0.0", "--port", "8000", "--no-browser"]

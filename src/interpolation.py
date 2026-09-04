@@ -24,8 +24,34 @@ class PredictionDetails:
 class GapInterpolator:
     """Интерполятор, устойчивый к новым полигонам и отсутствующим источникам."""
 
-    def __init__(self, context: pd.DataFrame):
+    def __init__(
+        self,
+        context: pd.DataFrame,
+        *,
+        neighbors_enabled: bool = True,
+        history_enabled: bool = True,
+        history_window: int = 21,
+        history_scale: float = 7.0,
+        crop_curve_enabled: bool = True,
+        crop_window: int = 7,
+        crop_scale: float = 3.0,
+        crop_aggregation: str = "median",
+        ensemble_params: dict[str, float] | None = None,
+    ):
         self.context = context.copy()
+        self.neighbors_enabled = neighbors_enabled
+        self.history_enabled = history_enabled
+        self.history_window = history_window
+        self.history_scale = history_scale
+        self.crop_curve_enabled = crop_curve_enabled
+        self.crop_window = crop_window
+        self.crop_scale = crop_scale
+        self.crop_aggregation = crop_aggregation
+        weights = ensemble_params or {}
+        self.baseline_weight_near = float(weights.get("baseline_weight_near", 0.86))
+        self.baseline_weight_far = float(weights.get("baseline_weight_far", 0.72))
+        self.historical_weight = float(weights.get("historical_weight", 0.22))
+        self.crop_curve_weight = float(weights.get("crop_curve_weight", 0.06))
         self.context["primary_ndvi"] = pd.to_numeric(
             self.context["primary_ndvi"], errors="coerce"
         )
@@ -49,21 +75,24 @@ class GapInterpolator:
         """Предварительно рассчитывает сглаженную сезонную кривую культуры."""
 
         curves: dict[tuple[str, int], float] = {}
+        if not self.crop_curve_enabled:
+            return curves
         observed = self.context[self.context["primary_ndvi"].notna()]
+        grouped = observed.groupby(["crop_type", "doy"], as_index=False)["primary_ndvi"]
         daily = (
-            observed.groupby(["crop_type", "doy"], as_index=False)["primary_ndvi"]
-            .median()
-            .sort_values(["crop_type", "doy"])
-        )
+            grouped.mean() if self.crop_aggregation == "mean" else grouped.median()
+        ).sort_values(["crop_type", "doy"])
         for crop_type, group in daily.groupby("crop_type", sort=False):
             days = group["doy"].to_numpy(float)
             values = group["primary_ndvi"].to_numpy(float)
             for doy in range(1, 367):
-                selected = np.abs(days - doy) <= 7
+                selected = np.abs(days - doy) <= self.crop_window
                 if not selected.any():
                     continue
                 curves[(str(crop_type), doy)] = self._weighted_stat(
-                    values[selected], np.abs(days[selected] - doy), scale=3.0
+                    values[selected],
+                    np.abs(days[selected] - doy),
+                    scale=self.crop_scale,
                 )
         return curves
 
@@ -82,7 +111,7 @@ class GapInterpolator:
         excluded_dates: set[pd.Timestamp],
     ) -> tuple[float | None, float | None, int | None, int | None]:
         group = self._groups.get((polygon_id, year))
-        if group is None:
+        if group is None or not self.neighbors_enabled:
             return None, None, None, None
 
         observed = group[
@@ -105,24 +134,28 @@ class GapInterpolator:
         self, polygon_id: str, year: int, doy: int, excluded_dates: set[pd.Timestamp]
     ) -> float | None:
         group = self._polygon_groups.get(polygon_id)
-        if group is None:
+        if group is None or not self.history_enabled:
             return None
         candidates = group[
             (group["year"] != year)
             & ~group["date"].isin(excluded_dates)
-            & ((group["doy"] - doy).abs() <= 21)
+            & ((group["doy"] - doy).abs() <= self.history_window)
         ]
         if candidates.empty:
             return None
         distances = (candidates["doy"] - doy).abs().to_numpy(float)
         return self._weighted_stat(
-            candidates["primary_ndvi"].to_numpy(float), distances, scale=7.0
+            candidates["primary_ndvi"].to_numpy(float),
+            distances,
+            scale=self.history_scale,
         )
 
     def _crop_value(
         self, crop_type: str, doy: int, excluded_dates: set[pd.Timestamp]
     ) -> float | None:
         # В агрегированной кривой вклад одной скрываемой точки пренебрежимо мал.
+        if not self.crop_curve_enabled:
+            return None
         return self._crop_curves.get((crop_type, doy))
 
     def predict_row(
@@ -163,12 +196,16 @@ class GapInterpolator:
             nearest_distance = min(
                 value for value in (prev_days, next_days) if value is not None
             )
-            baseline_weight = 0.86 if nearest_distance <= 16 else 0.72
+            baseline_weight = (
+                self.baseline_weight_near
+                if nearest_distance <= 16
+                else self.baseline_weight_far
+            )
             candidates.append((float(baseline), baseline_weight))
         if historical is not None and np.isfinite(historical):
-            candidates.append((historical, 0.22))
+            candidates.append((historical, self.historical_weight))
         if crop_curve is not None and np.isfinite(crop_curve):
-            candidates.append((crop_curve, 0.06))
+            candidates.append((crop_curve, self.crop_curve_weight))
 
         if not candidates:
             prediction = 0.35

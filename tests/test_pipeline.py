@@ -10,7 +10,9 @@ import numpy as np
 import pandas as pd
 
 from src.data import load_dataset
+from src.config import load_config, select_model
 from src.interpolation import GapInterpolator
+from src.pipeline import AnalysisPipeline
 from src.submission import validate_submission
 
 
@@ -56,6 +58,15 @@ class InterpolationTests(unittest.TestCase):
         result = GapInterpolator(frame).predict(frame.iloc[1:3])
         self.assertTrue(np.isfinite(result["prediction"]).all())
         self.assertTrue(result["confidence"].between(0, 1).all())
+
+    def test_pipeline_uses_model_selected_in_config(self):
+        frame = sample_frame()
+        config = select_model(load_config("config.yaml"), "baseline")
+        pipeline = AnalysisPipeline(frame, config=config)
+
+        result = pipeline.predict_targets(frame["primary_ndvi"].isna())
+
+        self.assertEqual(set(result["model"]), {"baseline"})
 
 
 class SubmissionTests(unittest.TestCase):

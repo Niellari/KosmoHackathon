@@ -8,27 +8,67 @@ import numpy as np
 import pandas as pd
 
 from src.anomalies import detect_anomalies
+from src.config import AppConfig, load_config
 from src.data import clean_primary_series, combine_context, load_dataset
-from src.interpolation import GapInterpolator
-from src.model import TrainedGapModel
+from src.predictor import PredictorService
 
 
 class AnalysisPipeline:
-    def __init__(self, data: pd.DataFrame, reference: pd.DataFrame | None = None):
+    def __init__(
+        self,
+        data: pd.DataFrame,
+        reference: pd.DataFrame | None = None,
+        config: AppConfig | None = None,
+    ):
         self.data = data.copy()
         self.data["primary_ndvi"] = clean_primary_series(self.data["primary_ndvi"])
         self.reference = None if reference is None else reference.copy()
+        self.config = config or load_config()
+        self._predictors: dict[str, PredictorService] = {}
 
     @classmethod
     def from_csv(
-        cls, data_path: Path | str, reference_path: Path | str | None = None
+        cls,
+        data_path: Path | str,
+        reference_path: Path | str | None = None,
+        config: AppConfig | None = None,
     ) -> "AnalysisPipeline":
         data = load_dataset(data_path)
         reference = load_dataset(reference_path) if reference_path else None
-        return cls(data, reference)
+        return cls(data, reference, config=config)
+
+    def _model_name(self, requested: str | None) -> str:
+        if requested in (None, "ml"):
+            return self.config.models.selected
+        return requested
+
+    def _create_predictor(
+        self, model_name: str, training_source: pd.DataFrame, cache: bool
+    ) -> PredictorService:
+        if model_name not in self.config.models.available:
+            choices = ", ".join(sorted(self.config.models.available))
+            raise ValueError(f"Неизвестная модель {model_name!r}. Доступны: {choices}")
+        if cache and model_name in self._predictors:
+            return self._predictors[model_name]
+        models_config = self.config.models.model_copy(update={"selected": model_name})
+        predictor = PredictorService(models_config, self.config.features)
+        predictor.prepare(training_source)
+        if cache:
+            self._predictors[model_name] = predictor
+        return predictor
+
+    def prepare_model(self, model_name: str | None = None) -> str:
+        """Загружает или обучает выбранную модель один раз при старте приложения."""
+
+        selected = self._model_name(model_name)
+        training_source = self.reference if self.reference is not None else self.data
+        predictor = self._create_predictor(
+            selected, training_source, cache=self.reference is not None
+        )
+        return predictor.selected_name
 
     def predict_targets(
-        self, target_mask: pd.Series, method: str = "ensemble"
+        self, target_mask: pd.Series, method: str | None = None
     ) -> pd.DataFrame:
         if len(target_mask) != len(self.data):
             raise ValueError("Размер target_mask не совпадает с датасетом")
@@ -39,11 +79,14 @@ class AnalysisPipeline:
         current = self.data.copy()
         current.loc[target_mask, "primary_ndvi"] = np.nan
         context = combine_context(current, self.reference)
-        if method == "ml":
-            training_source = self.reference if self.reference is not None else current
-            return TrainedGapModel().fit(training_source).predict(context, targets)
-        interpolator = GapInterpolator(context)
-        return interpolator.predict(targets, method=method, exclude_all_targets=True)
+        training_source = self.reference if self.reference is not None else current
+        model_name = self._model_name(method)
+        predictor = self._create_predictor(
+            model_name,
+            training_source,
+            cache=self.reference is not None,
+        )
+        return predictor.predict(context, targets)
 
     def analyze_polygon(self, polygon_id: str, year: int | None = None) -> pd.DataFrame:
         polygon_all = self.data[self.data["anon_polygon_id"] == polygon_id].copy()
@@ -59,10 +102,8 @@ class AnalysisPipeline:
         polygon["primary_ndvi_filled"] = polygon["primary_ndvi"]
         missing = polygon["primary_ndvi"].isna()
         if missing.any():
-            context = combine_context(self.data, self.reference)
-            predictions = GapInterpolator(context).predict(
-                polygon.loc[missing], method="ensemble", exclude_all_targets=True
-            )
+            target_mask = self.data.index.isin(polygon.loc[missing].index)
+            predictions = self.predict_targets(pd.Series(target_mask), method=None)
             polygon.loc[missing, "primary_ndvi_filled"] = predictions["prediction"]
             # Для восстановленных точек недоступная норма оценивается по другим годам.
             polygon.loc[missing, "ndvi_climatology_mean"] = predictions["historical"]
@@ -72,7 +113,9 @@ class AnalysisPipeline:
             polygon.loc[missing, "ndvi_climatology_std"] = std_fallback
         return detect_anomalies(polygon.reset_index(drop=True))
 
-    def validate(self, sample_size: int = 3000, seed: int = 42) -> dict[str, float]:
+    def validate(
+        self, sample_size: int = 3000, seed: int = 42, model_name: str | None = None
+    ) -> dict[str, float | str]:
         known = self.data.index[self.data["primary_ndvi"].notna()].to_numpy()
         if not len(known):
             raise ValueError("В датасете нет известных primary_ndvi")
@@ -82,8 +125,10 @@ class AnalysisPipeline:
         truth = self.data.loc[mask, "primary_ndvi"].to_numpy(float)
 
         baseline = self.predict_targets(pd.Series(mask), method="baseline")["prediction"]
-        ensemble = self.predict_targets(pd.Series(mask), method="ml")["prediction"]
+        selected_name = self._model_name(model_name)
+        selected = self.predict_targets(pd.Series(mask), method=selected_name)["prediction"]
         return {
             "baseline_rmse": float(np.sqrt(np.mean(np.square(truth - baseline.to_numpy())))),
-            "ml_rmse": float(np.sqrt(np.mean(np.square(truth - ensemble.to_numpy())))),
+            "model": selected_name,
+            "model_rmse": float(np.sqrt(np.mean(np.square(truth - selected.to_numpy())))),
         }

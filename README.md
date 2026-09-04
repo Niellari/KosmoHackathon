@@ -20,8 +20,13 @@
 
 ```text
 main.py                 единая точка входа
+config.yaml             данные, признаки, модели и режимы запуска
+src/config.py           строгая схема и загрузка YAML
 src/data.py             загрузка и нормализация CSV
 src/interpolation.py    восстановление primary_ndvi
+src/features.py         единое построение признаков
+src/models/             реестр и реализации моделей
+src/predictor.py        обучение, кэширование и общий инференс
 src/anomalies.py        климатическая норма и аномалии
 src/pipeline.py         общий pipeline для CLI и веб-сервиса
 src/submission.py       генерация и проверка submission.csv
@@ -52,20 +57,20 @@ pip install -r requirements.txt
 
 ```bash
 python main.py predict \
+  --config config.yaml \
   --input data/test_dataset.csv \
   --train data/train_dataset.csv \
   --output artifacts/submission.csv \
-  --method ml
+  --model lightgbm
 ```
 
 Воспроизведение baseline:
 
 ```bash
 python main.py predict \
-  --input data/test_dataset.csv \
-  --train data/train_dataset.csv \
-  --output artifacts/submission_baseline.csv \
-  --method baseline
+  --config config.yaml \
+  --model baseline \
+  --output artifacts/submission_baseline.csv
 ```
 
 Формат результата:
@@ -99,6 +104,7 @@ python main.py validate --train data/train_dataset.csv --sample-size 3000 --seed
 
 ```bash
 python main.py serve \
+  --config config.yaml \
   --data data/test_dataset.csv \
   --train data/train_dataset.csv \
   --host 127.0.0.1 \
@@ -111,6 +117,34 @@ python main.py serve \
 и напечатает фактически выбранный адрес, например `http://127.0.0.1:8001`.
 Страница откроется в системном браузере автоматически. Для запуска без открытия
 браузера используйте `python main.py serve --no-browser`.
+
+## Конфигурация и выбор модели
+
+Общие признаки и модель задаются в `config.yaml` и одинаково используются в
+`predict`, `validate` и `serve`. Активная модель выбирается в YAML:
+
+```yaml
+models:
+  selected: lightgbm
+```
+
+Доступны `baseline`, `ensemble`, `lightgbm`, `random_forest` и `catboost`.
+Выбор можно временно переопределить без редактирования файла:
+
+```bash
+python main.py validate --config config.yaml --model random_forest
+python main.py serve --config config.yaml --model baseline
+```
+
+Параметры каждой модели находятся в `models.available`. LightGBM и Random
+Forest устанавливаются из `requirements.txt`. CatBoost является опциональным:
+
+```bash
+pip install catboost
+```
+
+Обученная модель сохраняется в `artifacts/models/` и повторно используется,
+только если конфигурация признаков, параметры и сигнатура train не изменились.
 
 Основной сценарий:
 

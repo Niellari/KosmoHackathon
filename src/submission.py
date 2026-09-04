@@ -8,12 +8,14 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from src.config import AppConfig
 from src.pipeline import AnalysisPipeline
 
 
 @dataclass(frozen=True)
 class SubmissionResult:
     path: Path
+    model_name: str
     rows: int
     min_prediction: float
     max_prediction: float
@@ -46,10 +48,11 @@ def create_submission(
     input_path: Path,
     train_path: Path | None,
     output_path: Path,
-    method: str = "ml",
+    method: str | None = None,
     target_column: str = "primary_ndvi_true",
+    config: AppConfig | None = None,
 ) -> SubmissionResult:
-    pipeline = AnalysisPipeline.from_csv(input_path, train_path)
+    pipeline = AnalysisPipeline.from_csv(input_path, train_path, config=config)
     if "is_synthetic_gap" not in pipeline.data.columns:
         raise ValueError("В тестовом датасете отсутствует is_synthetic_gap")
 
@@ -70,6 +73,7 @@ def create_submission(
     submission.to_csv(output_path, index=False, encoding="utf-8")
     return SubmissionResult(
         path=output_path,
+        model_name=str(predictions["model"].iloc[0]),
         rows=len(submission),
         min_prediction=float(submission[target_column].min()),
         max_prediction=float(submission[target_column].max()),

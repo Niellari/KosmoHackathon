@@ -4,4 +4,5 @@ __pycache__/
 .venv/
 .~lock.*#
 artifacts/*.csv
+artifacts/models/
 !artifacts/.gitkeep
