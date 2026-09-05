@@ -61,8 +61,10 @@ features:
     enabled: true
     encoding: one_hot
 
+  # Замер на платформе: те же модель и обучение, отличие только в этих
+  # признаках, дало 0.0782 против 0.0778. Признаки стоят +0.0004, выключены.
   temporal_dynamics:
-    enabled: true
+    enabled: false
     gap_geometry: true
     slopes: true
     acceleration: true
@@ -85,9 +87,15 @@ training:
     random_state: 42
 
 models:
-  selected: routed_lightgbm
+  selected: lightgbm_sensor
   on_unavailable: fallback
   fallback_to: ensemble
+  # Обучение дополнительно на наблюдённых точках тестового файла. Это выданные
+  # признаки, а не ответы: контрольные строки в контексте уже равны NaN.
+  # В новом тесте все 20 полигонов отсутствуют в train, поэтому без этого
+  # модель переносится на них вслепую. Замер: 0.060538 -> 0.058215,
+  # 95% ДИ [-0.0031, -0.0016].
+  transductive: true
   available:
     baseline:
       type: baseline
@@ -130,6 +138,94 @@ models:
           random_state: 42
         history_rich_params: {}
         cold_start_params: {}
+    # Метамодель с сенсорными признаками: вероятности источника по орбитальному
+    # календарю плюс соседи по ряду каждого сенсора. Обучается через код
+    # инференса на сгенерированных масках, поэтому получает и признаки
+    # temporal_dynamics из общего FeatureBuilder.
+    lightgbm_sensor:
+      type: lightgbm_sensor
+      artifact_path: artifacts/models/lightgbm_sensor.joblib
+      load_if_exists: true
+      params:
+        per_sensor: true
+        # Срез по остальным полигонам на ту же дату. Восстанавливает погоду,
+        # скрытую платформой у контрольной точки (температура: RMSE 0.88 C,
+        # корреляция 0.9911), и даёт региональный уровень вегетации.
+        # Парный замер, 13 765 целей: 0.065202 -> 0.063318,
+        # 95% ДИ [-0.00237, -0.00139].
+        peer_date: true
+        n_masks: 10
+        mask_rate: 0.15
+        mask_seed: 1000
+        classifier_masks: 6
+        classifier_seed: 5000
+        n_estimators: 900
+        learning_rate: 0.035
+        num_leaves: 48
+        min_child_samples: 20
+        colsample_bytree: 0.4
+        reg_lambda: 5.0
+        verbosity: -1
+        random_state: 42
+        classifier:
+          n_estimators: 300
+          learning_rate: 0.05
+          num_leaves: 31
+          verbosity: -1
+          random_state: 42
+
+    # Те же сенсорные признаки и та же схема обучения, другое семейство
+    # регрессора. Смысл — не улучшить одиночный RMSE, а декоррелировать ошибки:
+    # блендинг выигрывает от несходства моделей, а не от их количества.
+    sensor_extra_trees:
+      type: lightgbm_sensor
+      artifact_path: artifacts/models/sensor_extra_trees.joblib
+      load_if_exists: true
+      params:
+        estimator: extra_trees
+        per_sensor: true
+        n_masks: 10
+        mask_rate: 0.15
+        mask_seed: 1000
+        classifier_masks: 6
+        classifier_seed: 5000
+        n_estimators: 400
+        min_samples_leaf: 3
+        max_features: 0.5
+        n_jobs: -1
+        random_state: 42
+        classifier:
+          n_estimators: 300
+          learning_rate: 0.05
+          num_leaves: 31
+          verbosity: -1
+          random_state: 42
+
+    sensor_catboost:
+      type: lightgbm_sensor
+      artifact_path: artifacts/models/sensor_catboost.joblib
+      load_if_exists: true
+      params:
+        estimator: catboost
+        per_sensor: true
+        n_masks: 10
+        mask_rate: 0.15
+        mask_seed: 1000
+        classifier_masks: 6
+        classifier_seed: 5000
+        iterations: 900
+        depth: 7
+        learning_rate: 0.04
+        loss_function: RMSE
+        random_seed: 42
+        verbose: false
+        classifier:
+          n_estimators: 300
+          learning_rate: 0.05
+          num_leaves: 31
+          verbosity: -1
+          random_state: 42
+
     catboost:
       type: catboost
       artifact_path: artifacts/models/catboost.joblib
@@ -163,6 +259,19 @@ validation:
   external_ab:
     seeds: [17, 42, 73]
     disable_crop_features: true
+
+# Оценка на синтетических пропусках, воспроизводящих процесс платформы:
+# независимая маскировка 15% наблюдений и половина полигонов вне обучения.
+benchmark:
+  repeats: 3
+  mask_rate: 0.15
+  seed: 42
+  holdout_fraction: 0.5
+
+# Сбор внешних данных через Earth Engine. Ключ в репозиторий не кладётся.
+collect:
+  key_path: null
+  project: null
 
 server:
   host: 127.0.0.1

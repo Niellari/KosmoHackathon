@@ -23,12 +23,12 @@ class ConfigTests(unittest.TestCase):
     def test_default_config_is_valid(self):
         config = load_config("config.yaml")
 
-        self.assertEqual(config.models.selected, "routed_lightgbm")
+        self.assertEqual(config.models.selected, "lightgbm_sensor")
         self.assertEqual(config.training.target_mode, "direct")
         self.assertEqual(config.training.residual_baseline, "linear")
         self.assertEqual(config.training.gap_masking.strategy, "leave_one_out")
         self.assertEqual(config.training.gap_masking.replicas, 5)
-        self.assertTrue(config.features.temporal_dynamics.enabled)
+        self.assertFalse(config.features.temporal_dynamics.enabled)
         self.assertIn("catboost", config.models.available)
         self.assertIn("routed_lightgbm", config.models.available)
         self.assertEqual(config.predict.prediction_column, "primary_ndvi_true")
@@ -41,7 +41,7 @@ class ConfigTests(unittest.TestCase):
         config = load_config("config.yaml")
         changed = select_model(config, "baseline")
 
-        self.assertEqual(config.models.selected, "routed_lightgbm")
+        self.assertEqual(config.models.selected, "lightgbm_sensor")
         self.assertEqual(changed.models.selected, "baseline")
 
     def test_unknown_config_fields_are_rejected(self):
@@ -77,7 +77,17 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(model.min_reference_years, 1)
 
     def test_default_feature_schema_is_stable(self):
-        builder = FeatureBuilder(load_config("config.yaml").features)
+        # Блок temporal_dynamics включается явно: в боевом конфиге он выключен
+        # по замеру на платформе, но схема признаков должна оставаться стабильной.
+        features = load_config("config.yaml").features
+        features = features.model_copy(
+            update={
+                "temporal_dynamics": features.temporal_dynamics.model_copy(
+                    update={"enabled": True}
+                )
+            }
+        )
+        builder = FeatureBuilder(features)
 
         self.assertEqual(len(builder.feature_names), 36)
         self.assertIn("linear", builder.feature_names)
@@ -155,7 +165,7 @@ class ConfigTests(unittest.TestCase):
             for column in builder.feature_names
             if HistoryRoutedLightGBMModel._is_history_feature(column)
         ]
-        self.assertEqual(len(builder.feature_names), 59)
+        self.assertEqual(len(builder.feature_names), 44)
         self.assertTrue(
             np.allclose(
                 train_matrix.loc[20, history_columns],

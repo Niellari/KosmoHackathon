@@ -63,6 +63,15 @@ def create_submission(
     submission = target_rows.copy()
     submission["date"] = submission["date"].dt.strftime("%Y-%m-%d")
     submission[target_column] = predictions.loc[target_rows.index, "prediction"]
+    settings = config.predict if config is not None else None
+    lower = getattr(settings, "clip_min", None)
+    upper = getattr(settings, "clip_max", None)
+    if lower is not None or upper is not None:
+        clipped = submission[target_column].clip(lower=lower, upper=upper)
+        affected = int((clipped != submission[target_column]).sum())
+        if affected:
+            print(f"Ограничено диапазоном [{lower}, {upper}]: {affected} значений")
+        submission[target_column] = clipped
     submission = submission.sort_values(["anon_polygon_id", "date"]).reset_index(drop=True)
 
     expected = target_rows.copy()

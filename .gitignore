@@ -10,3 +10,4 @@ artifacts/models/
 artifacts/submissions/
 artifacts/collection/
 !artifacts/.gitkeep
+catboost_info/

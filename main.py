@@ -149,6 +149,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     prepare_external.add_argument("--output", help="Путь к итоговому CSV")
 
+    benchmark = subparsers.add_parser(
+        "benchmark",
+        help="Честная оценка на синтетических пропусках по спецификации платформы",
+    )
+    benchmark.add_argument("--config", default="config.yaml")
+    benchmark.add_argument("--train")
+    benchmark.add_argument("--model", help="Имя модели из models.available")
+    benchmark.add_argument("--repeats", type=int)
+    benchmark.add_argument("--mask-rate", type=float)
+    benchmark.add_argument("--holdout-fraction", type=float)
+    benchmark.add_argument("--seed", type=int)
+    benchmark.add_argument(
+        "--profile",
+        action="store_true",
+        help="Сравнить профиль синтетики с реальными пропусками теста",
+    )
+    benchmark.add_argument(
+        "--test",
+        help="Тестовый датасет для эталонного профиля (по умолчанию data.test_path)",
+    )
+
     return parser
 
 
@@ -274,6 +295,43 @@ def main() -> None:
             f"с external={result['external_rmse_mean']:.6f}, "
             f"изменение={result['change_percent']:+.3f}%"
         )
+        return
+
+    if args.command == "benchmark":
+        from src.benchmark import run_benchmark
+        from src.data import load_dataset
+        from src.synthetic import compare_profiles, gap_profile
+
+        train_path = Path(args.train) if args.train else config.data.train_path
+        frame = load_dataset(train_path)
+
+        if args.profile:
+            test_path = Path(args.test) if args.test else config.data.test_path
+            reference = gap_profile(load_dataset(test_path))
+            spec_rate = args.mask_rate or config.benchmark.mask_rate
+            from src.synthetic import MaskSpec, apply_mask, generate_mask
+
+            mask = generate_mask(frame, MaskSpec(rate=spec_rate, seed=config.benchmark.seed))
+            generated = gap_profile(
+                apply_mask(frame, mask).assign(is_synthetic_gap=mask.to_numpy())
+            )
+            print(compare_profiles(reference, generated).to_string())
+            return
+
+        result = run_benchmark(
+            frame,
+            config,
+            model_name=config.models.selected,
+            repeats=args.repeats or config.benchmark.repeats,
+            mask_rate=args.mask_rate or config.benchmark.mask_rate,
+            seed=args.seed or config.benchmark.seed,
+            holdout_fraction=(
+                config.benchmark.holdout_fraction
+                if args.holdout_fraction is None
+                else args.holdout_fraction
+            ),
+        )
+        print(result.render())
         return
 
     if args.command == "serve":
