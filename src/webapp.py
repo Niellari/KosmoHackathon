@@ -4,6 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import errno
+import json
+import math
+import os
+import subprocess
+import sys
+import time
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 from pathlib import Path
 import socket
 from threading import Lock, Timer
@@ -16,6 +24,10 @@ from bottle import Bottle, HTTPError, request, response, static_file
 
 from src.config import AppConfig
 from src.pipeline import AnalysisPipeline
+from src.web_geometry import validate_geometry
+from src.field_lookup import choose_field
+from src.monitoring.config import load_monitoring_config, DEFAULT_CONFIG
+from src.monitoring.store import JobStore, QueueFullError
 
 
 def _json_value(value):
@@ -42,6 +54,8 @@ def create_app(
     data_path: Path,
     train_path: Path | None = None,
     config: AppConfig | None = None,
+    polygons_path: Path | None = None,
+    monitoring_config=None,
 ) -> Bottle:
     pipeline = AnalysisPipeline.from_csv(data_path, train_path, config=config)
     active_model = pipeline.prepare_model()
@@ -49,10 +63,259 @@ def create_app(
     state = AppState(pipeline=pipeline, active_model=active_model)
     app = Bottle()
     web_root = Path(__file__).resolve().parent.parent / "web"
+    storage = polygons_path or web_root.parent / "artifacts" / "web-polygons.json"
+    if storage.exists():
+        state.custom_polygons = json.loads(storage.read_text(encoding="utf-8"))
+    monitoring_config = monitoring_config or load_monitoring_config()
+    if polygons_path is not None:
+        monitoring_config = monitoring_config.model_copy(
+            update={"database": storage.parent / "monitoring-test.sqlite3"}
+        )
+    jobs = JobStore(monitoring_config)
+
+    @app.get("/api/map-config")
+    def map_config():
+        # Browser map keys are public by design; restrict origins at MapTiler.
+        key = os.environ.get("MAPTILER_API_KEY", "").strip()
+        local_config = web_root.parent / "maptiler.local.json"
+        if not key and local_config.exists():
+            try:
+                key = str(json.loads(local_config.read_text(encoding="utf-8")).get("api_key", "")).strip()
+            except (OSError, ValueError, AttributeError):
+                pass
+        response.set_header("Cache-Control", "no-store")
+        return {"maptiler_key": key}
+
+    @app.get("/api/monitoring")
+    def monitoring_info():
+        return {
+            "project_id": monitoring_config.project_id,
+            "history_years": monitoring_config.history_years,
+            "max_area_ha": monitoring_config.max_area_ha,
+            "max_period_days": monitoring_config.max_period_days,
+            "sources": ["Sentinel-2", "ERA5-Land"],
+        }
+
+    @app.post("/api/polygons/<polygon_id>/analyses")
+    def start_analysis(polygon_id):
+        # Запрос из чужой веб-страницы не должен расходовать квоту владельца.
+        origin = request.headers.get("Origin")
+        if (
+            origin
+            and origin.rstrip("/")
+            != f"{request.urlparts.scheme}://{request.urlparts.netloc}"
+        ):
+            raise HTTPError(403, "Запускайте анализ со страницы приложения")
+        payload = request.json or {}
+        if not isinstance(payload, dict):
+            raise HTTPError(400, "Ожидается объект JSON")
+        with state.lock:
+            polygon = state.custom_polygons.get(polygon_id)
+        if polygon is None:
+            raise HTTPError(404, "Сначала сохраните поле в «Мои поля»")
+        try:
+            job, reused = jobs.submit(polygon, payload.get("start"), payload.get("end"))
+        except QueueFullError as error:
+            raise HTTPError(429, str(error)) from error
+        except ValueError as error:
+            raise HTTPError(400, str(error)) from error
+        response.status = 200 if reused else 202
+        return {"job": job, "reused": reused}
+
+    @app.get("/api/polygons/<polygon_id>/analyses/latest")
+    def latest_analysis(polygon_id):
+        return {"job": jobs.latest(polygon_id)}
+
+    @app.get("/api/analyses/<job_id>")
+    def get_analysis(job_id):
+        job = jobs.get(job_id, with_result=True)
+        if job is None:
+            raise HTTPError(404, "Задание не найдено")
+        return job
+
+    def persist(items):
+        storage.parent.mkdir(parents=True, exist_ok=True)
+        temporary = storage.with_suffix(".tmp")
+        temporary.write_text(json.dumps(items, ensure_ascii=False), encoding="utf-8")
+        os.replace(temporary, storage)
+        state.custom_polygons = items
+
+    def remote_json(url, data=None):
+        try:
+            req = Request(
+                url, data=data, headers={"User-Agent": "AgroPulse-KosmoHackathon/1.0"}
+            )
+            with urlopen(req, timeout=30) as incoming:
+                return json.load(incoming)
+        except Exception as error:
+            raise HTTPError(
+                502, "Источник временно недоступен. Попробуйте ещё раз"
+            ) from error
+
+    @app.get("/api/search/plots")
+    def search_plots():
+        query = request.query.getunicode("q", "").strip().casefold().replace("ё", "е")
+        if not 2 <= len(query) <= 150:
+            raise HTTPError(400, "Введите от 2 до 150 символов")
+        with state.lock:
+            matches = [
+                dict(p)
+                for p in state.custom_polygons.values()
+                if query in str(p.get("name", "")).casefold().replace("ё", "е")
+            ]
+        return {"items": matches[:20]}
+
+    suggestions_cache = {}
+    suggestions_lock = Lock()
+
+    @app.get("/api/places/suggest")
+    def suggest_places():
+        query = request.query.getunicode("q", "").strip()
+        if not 2 <= len(query) <= 150:
+            raise HTTPError(400, "Введите от 2 до 150 символов")
+        key = query.casefold()
+        with suggestions_lock:
+            cached = suggestions_cache.get(key)
+            if cached and time.monotonic() - cached[0] < 3600:
+                return cached[1]
+        url = "https://photon.komoot.io/api/?" + urlencode(
+            {"q": query, "limit": 6, "layer": ["city", "state", "country", "locality"]},
+            doseq=True,
+        )
+        try:
+            with urlopen(
+                Request(url, headers={"User-Agent": "AgroPulse-KosmoHackathon/1.0"}),
+                timeout=8,
+            ) as incoming:
+                payload = json.load(incoming)
+        except Exception as error:
+            raise HTTPError(502, "Подсказки городов временно недоступны") from error
+        items = []
+        for feature in payload.get("features", []):
+            p = feature["properties"]
+            if not (p.get("osm_key") == "place" or
+                    (p.get("osm_key") == "boundary" and p.get("osm_value") == "administrative")):
+                continue
+            lon, lat = feature["geometry"]["coordinates"]
+            extent = p.get("extent")
+            items.append(
+                {
+                    "name": ", ".join(
+                        dict.fromkeys(
+                            v
+                            for v in [p.get("name"), p.get("state"), p.get("country")]
+                            if v
+                        )
+                    ),
+                    "lat": lat,
+                    "lon": lon,
+                    "bounds": (
+                        [extent[3], extent[1], extent[0], extent[2]] if extent else None
+                    ),
+                }
+            )
+        result = {"items": items, "source": "Photon / OpenStreetMap"}
+        with suggestions_lock:
+            if len(suggestions_cache) >= 256:
+                suggestions_cache.pop(next(iter(suggestions_cache)))
+            suggestions_cache[key] = (time.monotonic(), result)
+        return result
+
+    @app.get("/api/regions")
+    def regions():
+        query = request.query.getunicode("q", "").strip()
+        if not 2 <= len(query) <= 150:
+            raise HTTPError(400, "Введите название места от 2 символов")
+        payload = remote_json(
+            "https://nominatim.openstreetmap.org/search?"
+            + urlencode(
+                {"q": query, "format": "json", "limit": 5, "accept-language": "ru"}
+            )
+        )
+        return {
+            "items": [
+                {
+                    "name": p["display_name"],
+                    "lat": float(p["lat"]),
+                    "lon": float(p["lon"]),
+                    "bounds": (
+                        [float(v) for v in p["boundingbox"]]
+                        if p.get("boundingbox")
+                        else None
+                    ),
+                }
+                for p in payload
+            ]
+        }
+
+    @app.get("/api/fields")
+    def fields():
+        raw = request.query.get("bbox")
+        point = None
+        if request.query.get("lat") is not None:
+            try:
+                lat, lon = float(request.query.lat), float(request.query.lon)
+                if not (-85 < lat < 85 and -180 < lon < 180):
+                    raise ValueError()
+                point = (lat, lon)
+                dx = 2000 / (111320 * math.cos(math.radians(lat)))
+                raw = f"{max(-85,lat-.018)},{max(-180,lon-dx)},{min(85,lat+.018)},{min(180,lon+dx)}"
+            except (ValueError, TypeError) as error:
+                raise HTTPError(400, "Некорректная точка поиска") from error
+        if not raw:
+            path = web_root.parent / "data" / "external" / "polygons.geojson"
+            return (
+                json.loads(path.read_text(encoding="utf-8"))
+                if path.exists()
+                else {"type": "FeatureCollection", "features": []}
+            )
+        try:
+            south, west, north, east = map(float, raw.split(","))
+            if not (
+                -85 <= south < north <= 85
+                and -180 <= west < east <= 180
+                and (point is not None or (north - south <= 0.3 and east - west <= 0.5))
+            ):
+                raise ValueError()
+        except ValueError as error:
+            raise HTTPError(400, "Приблизьте карту для поиска полей") from error
+        query = f'[out:json][timeout:20];way["landuse"="farmland"]({south},{west},{north},{east});out tags geom 150;'
+        payload = remote_json(
+            "https://overpass-api.de/api/interpreter",
+            urlencode({"data": query}).encode(),
+        )
+        if payload.get("remark"):
+            raise HTTPError(502, "OSM не завершил поиск. Попробуйте ещё раз")
+        features = []
+        for item in payload.get("elements", []):
+            geometry = {
+                "type": "Polygon",
+                "coordinates": [
+                    [[p["lon"], p["lat"]] for p in item.get("geometry", [])]
+                ],
+            }
+            try:
+                area = validate_geometry(geometry)
+            except ValueError:
+                continue
+            features.append(
+                {
+                    "type": "Feature",
+                    "geometry": geometry,
+                    "properties": {
+                        "polygon_id": f'OSM-{item["id"]}',
+                        "name": item.get("tags", {}).get("name", "Поле OSM"),
+                        "area_ha": area,
+                        "source": "OpenStreetMap",
+                    },
+                }
+            )
+        if point is not None:
+            return choose_field(features, *point)
+        return {"type": "FeatureCollection", "features": features}
 
     @app.hook("after_request")
     def enable_cors() -> None:
-        response.headers["Access-Control-Allow-Origin"] = "*"
         response.headers["Cache-Control"] = "no-store"
 
     @app.get("/")
@@ -101,21 +364,45 @@ def create_app(
     @app.post("/api/polygons")
     def add_polygon():
         payload = request.json or {}
+        if not isinstance(payload, dict):
+            raise HTTPError(400, "Ожидается объект JSON")
         geometry = payload.get("geometry")
-        if not geometry or geometry.get("type") != "Polygon":
-            raise HTTPError(400, "Ожидается GeoJSON Polygon")
+        try:
+            area = validate_geometry(geometry)
+        except ValueError as error:
+            raise HTTPError(400, str(error)) from error
         polygon_id = f"CUSTOM-{uuid4().hex[:6].upper()}"
         item = {
             "id": polygon_id,
-            "name": str(payload.get("name") or polygon_id),
+            "name": str(payload.get("name") or polygon_id).strip()[:80] or polygon_id,
             "crop_type": str(payload.get("crop_type") or "не указан"),
             "years": [],
             "source": "user_geometry",
             "geometry": geometry,
+            "area_ha": area,
         }
         with state.lock:
-            state.custom_polygons[polygon_id] = item
+            persist({**state.custom_polygons, polygon_id: item})
         response.status = 201
+        return item
+
+    @app.patch("/api/polygons/<polygon_id>")
+    def rename_polygon(polygon_id: str):
+        payload = request.json or {}
+        if (
+            not isinstance(payload, dict)
+            or not isinstance(payload.get("name"), str)
+            or not payload["name"].strip()
+        ):
+            raise HTTPError(400, "Введите название поля")
+        with state.lock:
+            if polygon_id not in state.custom_polygons:
+                raise HTTPError(404, "Сохранённое поле не найдено")
+            item = {
+                **state.custom_polygons[polygon_id],
+                "name": payload["name"].strip()[:80],
+            }
+            persist({**state.custom_polygons, polygon_id: item})
         return item
 
     @app.delete("/api/polygons/<polygon_id>")
@@ -123,13 +410,22 @@ def create_app(
         with state.lock:
             if polygon_id not in state.custom_polygons:
                 raise HTTPError(404, "Можно удалять только пользовательские полигоны")
-            del state.custom_polygons[polygon_id]
+            persist(
+                {
+                    key: item
+                    for key, item in state.custom_polygons.items()
+                    if key != polygon_id
+                }
+            )
         return {"deleted": polygon_id}
 
     @app.get("/api/series/<polygon_id>")
     def series(polygon_id: str):
         raw_year = request.query.get("year")
-        year = int(raw_year) if raw_year else None
+        try:
+            year = int(raw_year) if raw_year else None
+        except ValueError as error:
+            raise HTTPError(400, "Некорректный сезон") from error
         try:
             analyzed = state.pipeline.analyze_polygon(polygon_id, year=year)
         except KeyError as error:
@@ -143,6 +439,7 @@ def create_app(
                     "observed": _json_value(row.get("primary_ndvi")),
                     "filled": _json_value(row.get("primary_ndvi_filled")),
                     "climatology": _json_value(row.get("climatology_mean_calc")),
+                    "climatology_std": _json_value(row.get("climatology_std_calc")),
                     "zscore": _json_value(row.get("ndvi_zscore_calc")),
                     "status": _json_value(row.get("status_calc")),
                     "explanation": _json_value(row.get("anomaly_explanation")),
@@ -221,4 +518,26 @@ def run_server(
         browser_timer = Timer(0.5, open_in_browser, args=(url,))
         browser_timer.daemon = True
         browser_timer.start()
-    app.run(host=host, port=selected_port, debug=debug, reloader=False)
+    # Отдельный процесс переживает обновление страницы и не блокирует HTTP.
+    # SQLite и месячный кэш позволяют продолжить после перезапуска сервера.
+    log_path = DEFAULT_CONFIG.parent.parent / "artifacts" / "monitoring" / "worker.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as log:
+        worker = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "src.monitoring.worker",
+                "--config",
+                str(DEFAULT_CONFIG),
+            ],
+            cwd=str(DEFAULT_CONFIG.parent.parent),
+            stdout=log,
+            stderr=log,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        try:
+            app.run(host=host, port=selected_port, debug=debug, reloader=False)
+        finally:
+            worker.terminate()
+            worker.wait(timeout=10)

@@ -71,6 +71,8 @@ training:
   # residual доступен, но direct пока показывает лучший локальный RMSE.
   target_mode: direct
   residual_baseline: linear
+  # Известные точки test — разрешённые наблюдения тех же временных рядов.
+  use_context_labels: true
   gap_masking:
     strategy: leave_one_out
     target_fraction: 0.15
@@ -84,7 +86,7 @@ training:
     random_state: 42
 
 models:
-  selected: routed_lightgbm
+  selected: sensor_lightgbm
   on_unavailable: fallback
   fallback_to: ensemble
   available:
@@ -129,6 +131,36 @@ models:
           random_state: 42
         history_rich_params: {}
         cold_start_params: {}
+    sensor_lightgbm:
+      type: sensor_lightgbm
+      artifact_path: artifacts/models/sensor_lightgbm.joblib
+      load_if_exists: true
+      params:
+        feature_version: 9
+        n_masks: 10
+        mask_rate: 0.15
+        mask_seed: 1000
+        classifier_masks: 6
+        classifier_seed: 5000
+        source_experts: true
+        expert_weight: 0.49
+        expert:
+          n_estimators: 650
+          num_leaves: 40
+        n_estimators: 900
+        learning_rate: 0.035
+        num_leaves: 48
+        min_child_samples: 20
+        colsample_bytree: 0.4
+        reg_lambda: 5.0
+        verbosity: -1
+        random_state: 42
+        classifier:
+          n_estimators: 300
+          learning_rate: 0.05
+          num_leaves: 31
+          verbosity: -1
+          random_state: 42
     catboost:
       type: catboost
       artifact_path: artifacts/models/catboost.joblib

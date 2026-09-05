@@ -4,9 +4,14 @@ __pycache__/
 .venv/
 .~lock.*#
 api/credentials.env
+maptiler.local.json
 api/save_page/
 artifacts/*.csv
 artifacts/models/
 artifacts/submissions/
 artifacts/collection/
+artifacts/benchmarks/
+artifacts/web-polygons.json
+artifacts/web-polygons.tmp
+artifacts/monitoring/
 !artifacts/.gitkeep

@@ -1,90 +1,348 @@
 <!doctype html>
 <html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>АгроПульс — мониторинг вегетации</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23cbe85e'/%3E%3Cpath d='M16 5l2.4 7.2L26 16l-7.6 3.8L16 27l-2.4-7.2L6 16l7.6-3.8z' fill='%23173d2b'/%3E%3C/svg%3E">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="/static/styles.css">
-</head>
-<body>
-  <div class="shell">
-    <aside class="sidebar">
-      <div class="brand"><span class="brand-mark">✦</span><span>АгроПульс</span></div>
-      <p class="eyebrow">КОСМОХАКАТОН 2026</p>
-      <h1>Состояние полей без слепых зон</h1>
-      <p class="lead">Восстанавливаем спутниковые наблюдения и объясняем негативные отклонения от сезонной нормы.</p>
-
-      <label for="polygonSelect">Полигон</label>
-      <select id="polygonSelect"></select>
-      <div class="inline-fields">
-        <div>
-          <label for="yearSelect">Сезон</label>
-          <select id="yearSelect"></select>
-        </div>
-        <div>
-          <label>Культура</label>
-          <div class="readout" id="cropType">—</div>
-        </div>
-      </div>
-      <button class="primary" id="analyzeButton">Проанализировать</button>
-
-      <div class="divider"></div>
-      <p class="section-title">Свой контур</p>
-      <p class="hint">Включите режим рисования и отметьте минимум три точки на карте.</p>
-      <div class="button-row">
-        <button class="secondary" id="drawButton">Рисовать</button>
-        <button class="ghost" id="saveButton" disabled>Сохранить</button>
-      </div>
-
-      <div class="dataset-meta" id="datasetMeta">Загрузка набора данных…</div>
-    </aside>
-
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>АгроПульс — карта полей</title>
+    <link rel="icon" href="data:," />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body class="fields-collapsed">
+    <header class="topbar">
+      <form id="searchForm" class="search" role="search">
+        <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><input
+          id="regionSearch"
+          aria-label="Город, страна или сохранённый участок"
+          placeholder="Город, страна или участок"
+          minlength="2"
+          maxlength="150"
+          required
+          autocomplete="off"
+        /><button id="searchButton">Найти</button>
+        <div id="searchResults" class="search-results" aria-label="Результаты поиска" aria-live="polite" hidden></div>
+      </form>
+      <button
+        id="toggleFields"
+        class="quiet"
+        aria-expanded="false"
+        aria-controls="fieldsPanel"
+        aria-label="Сохранённые поля"
+        title="Сохранённые поля"
+      >
+        <svg
+          width="24"
+          height="24"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          aria-hidden="true"
+        >
+          <path d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      </button>
+    </header>
     <main class="workspace">
-      <header class="topbar">
+      <button id="weatherToggle" class="weather-toggle" type="button" aria-pressed="false" aria-expanded="false" aria-controls="weatherPanel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 16a4 4 0 1 1 1-7 5 5 0 0 1 9 3 3 3 0 0 1 0 6H8M9 21l1-2m5 2 1-2"/></svg><span>Погода</span></button>
+      <section id="weatherPanel" class="weather-panel" aria-label="Погода на карте" hidden>
+        <header><strong>Погода на карте</strong><button id="weatherClose" type="button" aria-label="Закрыть погоду">×</button></header>
+        <div class="weather-modes" role="group" aria-label="Погодный слой"><button type="button" data-weather="temperature" aria-pressed="true">Температура</button><button type="button" data-weather="precipitation" aria-pressed="false">Осадки</button></div>
+        <label for="weatherTime">Время прогноза</label><select id="weatherTime" disabled></select>
+        <div id="weatherLegend" class="weather-legend"></div>
+        <p id="weatherValue" class="weather-value"></p>
+        <label class="weather-opacity" for="weatherOpacity"><span>Непрозрачность</span><input id="weatherOpacity" type="range" min="15" max="85" value="50" /></label>
+        <p id="weatherStatus" role="status" aria-live="polite"></p>
+        <button id="weatherRetry" type="button" hidden>Повторить загрузку</button>
+        <small>Прогноз GFS · сетка около 28 км. Не измерения на участке.</small>
+        <small>Облачность пока недоступна у подключённого источника.</small>
+        <a href="https://www.maptiler.com/weather/" target="_blank" rel="noopener">MapTiler Weather</a>
+      </section>
+      <div id="map" aria-label="Карта полей">
+        <div class="map-fallback">Загрузка карты…</div>
+      </div>
+      <nav class="shape-tools panel" aria-label="Инструменты выделения">
+        <button id="moveTools" class="tools-grip" aria-label="Переместить панель инструментов" title="Перетащите панель · стрелки — перемещение · Home или двойной клик — сброс">
+          <svg width="20" height="12" viewBox="0 0 20 12" fill="currentColor" aria-hidden="true"><circle cx="5" cy="3" r="1.3"/><circle cx="10" cy="3" r="1.3"/><circle cx="15" cy="3" r="1.3"/><circle cx="5" cy="9" r="1.3"/><circle cx="10" cy="9" r="1.3"/><circle cx="15" cy="9" r="1.3"/></svg>
+        </button>
+        <button
+          data-tool="pan"
+          title="Перемещение карты · сбросить выбор поля"
+          aria-label="Перемещение карты"
+          aria-pressed="false"
+        >
+          <svg
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.7"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+            focusable="false"
+            style="display: block; margin: auto"
+          >
+            <path
+              d="M8 13V6.5a1.5 1.5 0 0 1 3 0V12M11 6.5v-2a1.5 1.5 0 0 1 3 0V12M14 6.5a1.5 1.5 0 0 1 3 0V13M17 9.5a1.5 1.5 0 0 1 3 0V15a7 7 0 0 1-7 7h-1a6 6 0 0 1-4.8-2.4L3 14a1.5 1.5 0 0 1 2.4-1.8L8 15"
+            />
+          </svg>
+        </button>
+        <button
+          data-tool="select"
+          title="Курсор · выбор и перемещение карты"
+          aria-label="Курсор"
+          aria-pressed="true"
+        >
+          ↖
+        </button>
+        <button
+          data-tool="rectangle"
+          title="Прямоугольник · два противоположных угла"
+          aria-label="Прямоугольник"
+          aria-pressed="false"
+        >
+          □
+        </button>
+        <button
+          data-tool="circle"
+          title="Круг · центр и радиус"
+          aria-label="Круг"
+          aria-pressed="false"
+        >
+          ○
+        </button>
+        <button
+          data-tool="polygon"
+          title="Полигон · построение по точкам"
+          aria-label="Полигон"
+          aria-pressed="false"
+        >
+          ⬠
+        </button>
+        <button
+          data-tool="freehand"
+          title="Свободный контур · зажмите кнопку мыши и обведите поле"
+          aria-label="Свободный контур"
+          aria-pressed="false"
+        >
+          ✎
+        </button>
+        <button id="discoverButton" title="Найти участок · выберите точку на карте" aria-label="Найти участок" aria-pressed="false">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <path d="M9 3H4a1 1 0 0 0-1 1v5M15 3h5a1 1 0 0 1 1 1v5M21 15v5a1 1 0 0 1-1 1h-5M9 21H4a1 1 0 0 1-1-1v-5"/>
+            <circle cx="12" cy="12" r="4"/><path d="M12 10v4M10 12h4"/>
+          </svg>
+        </button>
+      </nav>
+      <aside id="fieldsPanel" class="panel fields-panel" aria-label="Мои поля">
+        <div class="panel-heading">
+          <p class="eyebrow">КАТАЛОГ УЧАСТКОВ</p>
+          <h1>
+            Участки <span id="fieldCount" class="counter">0</span>
+          </h1>
+          <button
+            id="closeFields"
+            class="quiet"
+            aria-label="Закрыть сохранённые поля"
+          >
+            ×
+          </button>
+        </div>
+        <p class="fields-list-label">СОХРАНЁННЫЕ КОНТУРЫ</p>
+        <div id="fieldList" class="field-list"></div>
+        <details class="dataset">
+          <summary>Конкурсные временные ряды</summary>
+          <p class="muted small">
+            У этих данных нет координат. Анализ доступен отдельно от карты.
+          </p>
+          <label for="polygonSelect">Полигон датасета</label
+          ><select id="polygonSelect">
+            <option value="">Выберите ряд</option>
+          </select>
+        </details>
+        <div class="panel-footer">АгроПульс <span>Карта · OpenStreetMap / ODbL</span></div>
+      </aside>
+      <dialog id="fieldDialog" class="field-dialog" aria-labelledby="fieldTitle">
+        <header class="field-dialog-header">
+        <div class="detail-heading">
+          <p id="fieldSource" class="eyebrow">ВЫБРАННОЕ ПОЛЕ</p>
+          <button
+            id="closeDetail"
+            class="icon-button"
+            aria-label="Закрыть карточку"
+          >
+            ×
+          </button>
+        </div>
+        <h2 id="fieldTitle">Поле</h2>
+        </header>
+        <div class="field-tabs" role="tablist" aria-label="Информация об участке">
+          <button id="fieldInfoTab" type="button" role="tab" aria-selected="true" aria-controls="fieldInfoPane">Общая информация</button>
+          <button id="fieldChartsTab" type="button" role="tab" aria-selected="false" aria-controls="fieldChartsPane" tabindex="-1">Графики</button>
+        </div>
+        <div class="field-dialog-content">
+        <section id="fieldInfoPane" role="tabpanel" aria-labelledby="fieldInfoTab" tabindex="0">
+        <div id="detailPanel" class="panel detail-panel" hidden>
+        <section class="plot-overview-card">
+        <h3>Об участке</h3>
+        <p id="fieldDescription" class="muted small"></p>
+        <div id="plotShapePreview" class="plot-shape-preview" aria-label="Контур участка"></div>
+        <div class="field-facts">
+          <div><span>Площадь</span><strong id="fieldArea">—</strong></div>
+          <div>
+            <span>Культура</span><strong id="cropType">Неизвестна</strong>
+          </div>
+        </div>
+        <label id="nameLabel" for="fieldName">Название поля</label
+        ><input
+          id="fieldName"
+          maxlength="80"
+          placeholder="Например, Северное поле"
+        /><button id="saveFieldButton" class="primary wide">
+          Добавить в мои поля
+        </button>
+        </section>
+        <section class="plot-analysis-card">
+        <h3>Анализ участка</h3>
+        <p class="plot-section-description">Выберите период наблюдений для оценки состояния растительности.</p>
+        <div id="analysisControls">
+          <label id="yearLabel" for="yearSelect">Сезон анализа</label
+          ><select id="yearSelect"></select>
+          <div id="realPeriod" hidden>
+            <div class="plot-period-grid"><div><label for="startDate">Начало периода</label
+            ><input id="startDate" type="date" min="2018-01-01" /></div><div><label
+              for="endDate"
+              >Конец периода</label
+            ><input id="endDate" type="date" min="2018-01-01" /></div></div>
+            <p class="muted small">
+              Sentinel-2 + ERA5-Land. История поля загружается автоматически.
+            </p>
+          </div>
+          <button id="analyzeButton" class="primary wide">
+            Проанализировать
+          </button>
+        </div>
+        <p id="analysisNotice" class="notice"></p>
+        <progress
+          id="jobProgress"
+          max="100"
+          value="0"
+          hidden
+          aria-label="Сбор спутниковых данных"
+        ></progress>
+        <div id="fieldSummary" hidden></div>
+        <div id="anomalyList" class="anomaly-list"></div>
+        <div id="dataNotes" class="muted small" hidden></div>
+        </section>
+        <button id="deleteButton" class="danger wide" hidden>
+          Удалить из моих полей
+        </button>
+        </div>
+        </section>
+        <section id="fieldChartsPane" role="tabpanel" aria-labelledby="fieldChartsTab" tabindex="0" hidden>
+          <div id="chartsEmpty" class="charts-empty"><strong>Графики появятся после анализа</strong><p>Выберите период и запустите анализ на вкладке «Общая информация».</p><button id="goToFieldInfo" type="button">К общей информации</button></div>
+        </section>
+        </div>
+      </dialog>
+      <section
+        id="drawToolbar"
+        class="draw-toolbar panel"
+        aria-label="Редактор контура"
+        hidden
+      >
         <div>
-          <p class="eyebrow">МОНИТОРИНГ ВЕГЕТАЦИИ</p>
-          <h2 id="viewTitle">Выберите полигон</h2>
+          <strong id="drawTitle">Отметьте вершины поля</strong>
+          <p id="drawHint">Замкните границу нажатием на первую точку.</p>
         </div>
-        <div class="live"><span></span>Локальный pipeline</div>
-      </header>
-
-      <section class="map-panel card">
-        <div id="map">
-          <div class="map-fallback">Карта загружается…</div>
+        <span id="drawArea" class="area-pill">0 га</span
+        ><button id="undoButton" class="quiet">↶ Назад</button
+        ><button id="verticesButton" class="quiet" hidden>Вершины</button
+        ><button id="closePolygonButton" class="quiet" disabled>Замкнуть</button
+        ><button id="cancelDraw" class="quiet">Отмена</button
+        ><button id="saveButton" class="primary" disabled>
+          Сохранить поле
+        </button>
+      </section>
+      <section
+        id="chartPanel"
+        class="chart-panel panel"
+        hidden
+        aria-label="Анализ NDVI"
+      >
+        <button id="toggleChart" class="chart-toggle" aria-expanded="true">
+          <span
+            ><span class="eyebrow">ДИНАМИКА ВЕГЕТАЦИИ</span
+            ><strong id="chartTitle">NDVI и сезонная норма</strong></span
+          ><span id="chartChevron">⌄</span>
+        </button>
+        <div id="chartBody">
+          <div class="chart-meta">
+            <div class="legend">
+              <span>Наблюдения</span
+              ><span class="filled-key">Восстановленный ряд</span
+              ><span class="norm-key">Норма ± 1σ</span
+              ><span class="anomaly-key">Отклонения</span>
+            </div>
+            <output id="chartReadout"
+              >Наведите на график для подробностей</output
+            >
+          </div>
+          <div id="chart"></div>
+          <p class="chart-footnote">
+            Полоса — разброс исторических значений, не уверенность прогноза.
+            Возможные причины отклонений требуют проверки.
+          </p>
         </div>
-        <div class="map-note">Контуры конкурсного датасета анонимизированы. Карта используется для добавления пользовательской геометрии.</div>
       </section>
-
-      <section class="metrics">
-        <article class="metric card"><span>Наблюдений</span><strong id="observations">—</strong><small>исходный NDVI</small></article>
-        <article class="metric card"><span>Восстановлено</span><strong id="restored">—</strong><small>точек ряда</small></article>
-        <article class="metric card accent"><span>Аномалий</span><strong id="anomalies">—</strong><small>негативных дат</small></article>
-        <article class="metric card"><span>Средний NDVI</span><strong id="meanNdvi">—</strong><small>за сезон</small></article>
-      </section>
-
-      <section class="chart-card card">
-        <div class="card-header">
-          <div><p class="eyebrow">ВРЕМЕННОЙ РЯД</p><h3>NDVI и сезонная норма</h3></div>
-          <div class="legend"><span class="observed-dot">Исходный</span><span class="filled-dot">Восстановленный</span><span class="norm-dot">Норма</span></div>
-        </div>
-        <div id="chart" class="chart"><div class="empty">Нажмите «Проанализировать»</div></div>
-      </section>
-
-      <section class="anomaly-card card">
-        <div class="card-header">
-          <div><p class="eyebrow">ИНТЕРПРЕТАЦИЯ</p><h3>Негативные отклонения</h3></div>
-        </div>
-        <div id="anomalyList" class="anomaly-list"><div class="empty">Аномалии появятся после анализа</div></div>
-      </section>
+      <div class="settings-control">
+        <button id="settingsButton" class="settings-button" aria-label="Настройки карты" title="Настройки" aria-expanded="false" aria-controls="settingsPanel">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 3-.6 2.2-1.5.9-2.2-.6-3 5.1 1.6 1.6v1.8l-1.6 1.6 3 5.1 2.2-.6 1.5.9L9 23h6l.6-2.2 1.5-.9 2.2.6 3-5.1-1.6-1.6V12l1.6-1.6-3-5.1-2.2.6-1.5-.9L15 3Z" transform="translate(1 0) scale(.9)"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+      </div>
     </main>
-  </div>
-  <div class="toast" id="toast"></div>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="/static/app.js"></script>
-</body>
+        <dialog id="settingsPanel" class="settings-panel" aria-labelledby="settingsTitle">
+          <div class="settings-heading"><h2 id="settingsTitle">Настройки</h2><button id="closeSettings" aria-label="Закрыть настройки">×</button></div>
+          <p class="settings-intro">Настройте интерфейс и карту под себя.</p>
+          <section class="settings-section">
+          <h3>Интерфейс</h3>
+          <label class="settings-row language-row" for="languageSelect"><span><strong>Язык интерфейса</strong><small>Применяется сразу, без перезагрузки</small></span><select id="languageSelect"><option value="ru">Русский</option><option value="en">English</option></select></label>
+          </section>
+          <section class="settings-section">
+          <h3 id="mapLayersTitle">Слои карты</h3>
+          <p class="layer-description">Выберите оформление подложки. Ваши участки останутся на карте.</p>
+          <div class="basemap-options" role="group" aria-labelledby="mapLayersTitle">
+            <button type="button" class="basemap-option" data-basemap="satellite" aria-pressed="false"><span class="basemap-preview preview-satellite" aria-hidden="true"></span><strong>Спутник</strong><small>MapTiler · фотоснимки</small></button>
+            <button type="button" class="basemap-option" data-basemap="standard" aria-pressed="true"><span class="basemap-preview preview-standard" aria-hidden="true"></span><strong>Стандартный</strong><small>OpenStreetMap</small></button>
+            <button type="button" class="basemap-option" data-basemap="light" aria-pressed="false"><span class="basemap-preview preview-light" aria-hidden="true"></span><strong>Светлый</strong><small>OSM · светлая палитра</small></button>
+            <button type="button" class="basemap-option" data-basemap="dark" aria-pressed="false"><span class="basemap-preview preview-dark" aria-hidden="true"></span><strong>Тёмный</strong><small>OSM · тёмная палитра</small></button>
+            <button type="button" class="basemap-option" data-basemap="topo" aria-pressed="false"><span class="basemap-preview preview-topo" aria-hidden="true"></span><strong>Топографический</strong><small>OpenTopoMap</small></button>
+          </div>
+          <p id="basemapStatus" class="layer-description" role="status" aria-live="polite"></p>
+          <p class="layer-description">Спутник: снимки разных дат, не в реальном времени. Детализация зависит от региона.</p>
+          </section>
+          <section class="settings-section">
+          <h3>Объекты на карте</h3>
+          <label class="settings-row" for="showOsmFields"><span><strong>Контуры OSM</strong><small>Сохранённые участки видны всегда</small></span><input id="showOsmFields" type="checkbox" checked /></label>
+          </section>
+          <section class="settings-section">
+          <h3>Рабочее пространство</h3>
+          <button id="resetTools" class="reset-tools">Вернуть панель инструментов на место</button>
+          </section>
+          <p class="settings-footnote">Настройки сохраняются в этом браузере.</p>
+        </dialog>
+    <div id="toast" class="toast">
+      <span id="toastMessage" role="status" aria-live="polite" aria-atomic="true"></span>
+      <button id="closeToast" type="button" aria-label="Закрыть уведомление" title="Закрыть уведомление"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+    </div>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="/static/i18n.js"></script>
+    <script src="/static/weather.js"></script>
+    <script src="/static/app.js"></script>
+  </body>
 </html>

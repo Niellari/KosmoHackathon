@@ -1,0 +1,12 @@
+# ID проекта не является секретом. Авторизация хранится отдельно от репозитория.
+project_id: sunlit-arcade-460421-j9
+history_years: 3
+max_area_ha: 5000
+max_period_days: 366
+max_queued_jobs: 10
+scale_m: 20
+min_valid_fraction: 0.6
+min_pixel_count: 10
+max_interpolation_gap_days: 30
+database: ../artifacts/monitoring/jobs.sqlite3
+cache_directory: ../artifacts/monitoring/cache

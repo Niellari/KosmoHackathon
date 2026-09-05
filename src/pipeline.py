@@ -54,8 +54,17 @@ class AnalysisPipeline:
             config=active_config,
         )
 
-    def _training_source(self, primary: pd.DataFrame) -> pd.DataFrame:
-        return combine_training_sources(primary, self.training_extra)
+    def _training_source(
+        self,
+        primary: pd.DataFrame,
+        context: pd.DataFrame | None = None,
+    ) -> pd.DataFrame:
+        competition = (
+            context
+            if self.config.training.use_context_labels and context is not None
+            else primary
+        )
+        return combine_training_sources(competition, self.training_extra)
 
     def _model_name(self, requested: str | None) -> str:
         if requested in (None, "ml"):
@@ -84,7 +93,8 @@ class AnalysisPipeline:
 
         selected = self._model_name(model_name)
         primary = self.reference if self.reference is not None else self.data
-        training_source = self._training_source(primary)
+        context = combine_context(self.data, self.reference)
+        training_source = self._training_source(primary, context)
         predictor = self._create_predictor(
             selected, training_source, cache=self.reference is not None
         )
@@ -103,7 +113,7 @@ class AnalysisPipeline:
         current.loc[target_mask, "primary_ndvi"] = np.nan
         context = combine_context(current, self.reference)
         primary = self.reference if self.reference is not None else current
-        training_source = self._training_source(primary)
+        training_source = self._training_source(primary, context)
         model_name = self._model_name(method)
         predictor = self._create_predictor(
             model_name,
@@ -123,18 +133,29 @@ class AnalysisPipeline:
         if polygon.empty:
             raise KeyError(f"Для полигона {polygon_id} нет данных за {year} год")
 
+        # В новой версии test нет климатологии: берём только известные наблюдения
+        # этого поля за другие годы, не используя восстановленные значения.
+        history = combine_context(self.data, self.reference)
+        history = history[(history['anon_polygon_id'] == polygon_id) & (history['year'] != year)]
+        history = history[history['primary_ndvi'].notna()]
+        for column in ('ndvi_climatology_mean', 'ndvi_climatology_std'):
+            if column not in polygon:
+                polygon[column] = np.nan
+        for index, row in polygon.iterrows():
+            candidates = history.loc[(history['doy'] - row['doy']).abs() <= 21, 'primary_ndvi']
+            if len(candidates) >= 3:
+                if pd.isna(row['ndvi_climatology_mean']):
+                    polygon.at[index, 'ndvi_climatology_mean'] = float(candidates.median())
+                if pd.isna(row['ndvi_climatology_std']):
+                    polygon.at[index, 'ndvi_climatology_std'] = max(float(candidates.std(ddof=0)), .03)
+
         polygon["primary_ndvi_filled"] = polygon["primary_ndvi"]
         missing = polygon["primary_ndvi"].isna()
         if missing.any():
             target_mask = self.data.index.isin(polygon.loc[missing].index)
             predictions = self.predict_targets(pd.Series(target_mask), method=None)
             polygon.loc[missing, "primary_ndvi_filled"] = predictions["prediction"]
-            # Для восстановленных точек недоступная норма оценивается по другим годам.
-            polygon.loc[missing, "ndvi_climatology_mean"] = predictions["historical"]
-            std_fallback = polygon_all["ndvi_climatology_std"].median()
-            if not np.isfinite(std_fallback):
-                std_fallback = 0.1
-            polygon.loc[missing, "ndvi_climatology_std"] = std_fallback
+            # Климатология рассчитана отдельно по фактической истории поля.
         return detect_anomalies(polygon.reset_index(drop=True))
 
     def validate(

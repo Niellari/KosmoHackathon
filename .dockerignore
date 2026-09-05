@@ -1,4 +1,8 @@
 .git
+.venv
+api/credentials.env
+**/*credentials*.json
+**/*service-account*.json
 __pycache__
 *.py[cod]
 .pytest_cache
