@@ -1,0 +1,52 @@
+region:
+  name: rostov_oblast_weather_search
+  bbox:
+    min_lon: 38.20
+    min_lat: 45.90
+    max_lon: 44.30
+    max_lat: 49.30
+
+polygons:
+  path: ../data/external/weather-search-placeholder.geojson
+  id_property: polygon_id
+  id_prefix: EXT-WZ-
+  selection:
+    limit: 10
+    min_area_ha: 20
+    max_area_ha: 500
+    min_cropland_fraction: 0.80
+    strategy: spatially_balanced
+    min_centroid_distance_km: 5
+    grid_cell_km: 10
+    max_per_grid_cell: 1
+
+period:
+  start: 2024-04-01
+  end: 2024-10-30
+
+provider:
+  type: earth_engine
+  project_id_env: EE_PROJECT_ID
+
+weather_zones:
+  dataset: ECMWF/ERA5_LAND/DAILY_AGGR
+  temperature_band: temperature_2m
+  precipitation_band: total_precipitation_sum
+  grid_step_degrees: 0.20
+  sample_dates: 48
+  min_profile_dates: 2
+  top_zones: 6
+  min_zone_distance_km: 30
+  min_year: 2010
+  max_year: 2025
+
+field_validation:
+  enabled: true
+  candidate_pool_size: 40
+  min_valid_sentinel2_observations: 12
+
+output:
+  raw_directory: ../artifacts/collection/weather-zones/raw
+  manifest_directory: ../artifacts/collection/weather-zones/manifests
+  dataset_path: ../data/external/processed/weather-zones.csv
+  format: csv

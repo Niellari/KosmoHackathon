@@ -1,0 +1,469 @@
+{
+  "type": "FeatureCollection",
+  "name": "era5_zone02_agriculture",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "polygon_id": "EXT-WZ02-0001",
+        "source": "OpenStreetMap",
+        "source_license": "ODbL",
+        "osm_way_id": 195794386,
+        "landuse": "farmland",
+        "area_ha": 82.17,
+        "centroid_lon": 41.1989995,
+        "centroid_lat": 46.4976206,
+        "cropland_fraction": 0.9406822524354332,
+        "sentinel2_valid_observations": 46
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              41.1976127,
+              46.5042136
+            ],
+            [
+              41.2035031,
+              46.503807
+            ],
+            [
+              41.2011289,
+              46.4877001
+            ],
+            [
+              41.19514,
+              46.4881686
+            ],
+            [
+              41.1976127,
+              46.5042136
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "polygon_id": "EXT-WZ02-0002",
+        "source": "OpenStreetMap",
+        "source_license": "ODbL",
+        "osm_way_id": 93238613,
+        "landuse": "farmland",
+        "area_ha": 48.71,
+        "centroid_lon": 41.3195401,
+        "centroid_lat": 46.6312011,
+        "cropland_fraction": 0.982264464833964,
+        "sentinel2_valid_observations": 43
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              41.3196803,
+              46.6394158
+            ],
+            [
+              41.3224706,
+              46.6392126
+            ],
+            [
+              41.3193297,
+              46.6188789
+            ],
+            [
+              41.3165394,
+              46.6190822
+            ],
+            [
+              41.3196803,
+              46.6394158
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "polygon_id": "EXT-WZ02-0003",
+        "source": "OpenStreetMap",
+        "source_license": "ODbL",
+        "osm_way_id": 133508621,
+        "landuse": "farmland",
+        "area_ha": 77.33,
+        "centroid_lon": 41.0592524,
+        "centroid_lat": 46.6137393,
+        "cropland_fraction": 0.9916192952241593,
+        "sentinel2_valid_observations": 43
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              41.0570817,
+              46.6190123
+            ],
+            [
+              41.064005,
+              46.6183759
+            ],
+            [
+              41.0627806,
+              46.6059466
+            ],
+            [
+              41.0553131,
+              46.6063495
+            ],
+            [
+              41.0570817,
+              46.6190123
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "polygon_id": "EXT-WZ02-0004",
+        "source": "OpenStreetMap",
+        "source_license": "ODbL",
+        "osm_way_id": 93149182,
+        "landuse": "farmland",
+        "area_ha": 88.86,
+        "centroid_lon": 41.343817,
+        "centroid_lat": 46.4557511,
+        "cropland_fraction": 0.9841599055952693,
+        "sentinel2_valid_observations": 47
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              41.3471315,
+              46.463246
+            ],
+            [
+              41.3417349,
+              46.463633
+            ],
+            [
+              41.3388453,
+              46.4445089
+            ],
+            [
+              41.3442419,
+              46.4441218
+            ],
+            [
+              41.3471315,
+              46.463246
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "polygon_id": "EXT-WZ02-0005",
+        "source": "OpenStreetMap",
+        "source_license": "ODbL",
+        "osm_way_id": 93149278,
+        "landuse": "farmland",
+        "area_ha": 92.28,
+        "centroid_lon": 41.3443408,
+        "centroid_lat": 46.546195,
+        "cropland_fraction": 0.9848302314004324,
+        "sentinel2_valid_observations": 42
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              41.3430954,
+              46.553672
+            ],
+            [
+              41.3489708,
+              46.553252
+            ],
+            [
+              41.3462089,
+              46.5349794
+            ],
+            [
+              41.3403335,
+              46.5353996
+            ],
+            [
+              41.3430954,
+              46.553672
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "polygon_id": "EXT-WZ02-0006",
+        "source": "OpenStreetMap",
+        "source_license": "ODbL",
+        "osm_way_id": 133507634,
+        "landuse": "farmland",
+        "area_ha": 53.55,
+        "centroid_lon": 41.08024,
+        "centroid_lat": 46.5284613,
+        "cropland_fraction": 0.9885595097033278,
+        "sentinel2_valid_observations": 47
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              41.08193,
+              46.5272393
+            ],
+            [
+              41.0817459,
+              46.5270955
+            ],
+            [
+              41.0815191,
+              46.52702
+            ],
+            [
+              41.0810269,
+              46.5269576
+            ],
+            [
+              41.0806898,
+              46.5268748
+            ],
+            [
+              41.0803243,
+              46.5267855
+            ],
+            [
+              41.0800101,
+              46.5267502
+            ],
+            [
+              41.0794006,
+              46.526758
+            ],
+            [
+              41.074859,
+              46.5271341
+            ],
+            [
+              41.0762262,
+              46.5360929
+            ],
+            [
+              41.0832179,
+              46.5355879
+            ],
+            [
+              41.08193,
+              46.5272393
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "polygon_id": "EXT-WZ02-0007",
+        "source": "OpenStreetMap",
+        "source_license": "ODbL",
+        "osm_way_id": 93238867,
+        "landuse": "farmland",
+        "area_ha": 54.28,
+        "centroid_lon": 41.2226318,
+        "centroid_lat": 46.580827,
+        "cropland_fraction": 0.9996635829260657,
+        "sentinel2_valid_observations": 41
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              41.2199298,
+              46.5842225
+            ],
+            [
+              41.2279281,
+              46.5836273
+            ],
+            [
+              41.2266848,
+              46.5757338
+            ],
+            [
+              41.2186865,
+              46.576329
+            ],
+            [
+              41.2199298,
+              46.5842225
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "polygon_id": "EXT-WZ02-0008",
+        "source": "OpenStreetMap",
+        "source_license": "ODbL",
+        "osm_way_id": 196022896,
+        "landuse": "farmland",
+        "area_ha": 60.07,
+        "centroid_lon": 41.2112252,
+        "centroid_lat": 46.4207639,
+        "cropland_fraction": 0.9945601244323824,
+        "sentinel2_valid_observations": 43
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              41.2085913,
+              46.4250031
+            ],
+            [
+              41.2110569,
+              46.4248396
+            ],
+            [
+              41.2124083,
+              46.4246513
+            ],
+            [
+              41.2170017,
+              46.4243292
+            ],
+            [
+              41.2176414,
+              46.4243144
+            ],
+            [
+              41.2167192,
+              46.4176974
+            ],
+            [
+              41.2165769,
+              46.4175782
+            ],
+            [
+              41.2140253,
+              46.4173259
+            ],
+            [
+              41.213029,
+              46.4169895
+            ],
+            [
+              41.2095828,
+              46.4168914
+            ],
+            [
+              41.2084239,
+              46.417389
+            ],
+            [
+              41.2075903,
+              46.4183351
+            ],
+            [
+              41.207265,
+              46.4190289
+            ],
+            [
+              41.207387,
+              46.4204796
+            ],
+            [
+              41.2072281,
+              46.4210354
+            ],
+            [
+              41.2077097,
+              46.4220958
+            ],
+            [
+              41.2085913,
+              46.4250031
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "polygon_id": "EXT-WZ02-0009",
+        "source": "OpenStreetMap",
+        "source_license": "ODbL",
+        "osm_way_id": 93238462,
+        "landuse": "farmland",
+        "area_ha": 34.52,
+        "centroid_lon": 41.2400371,
+        "centroid_lat": 46.6295215,
+        "cropland_fraction": 0.997570871629789,
+        "sentinel2_valid_observations": 43
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              41.2383401,
+              46.6327328
+            ],
+            [
+              41.2437032,
+              46.6322413
+            ],
+            [
+              41.2425499,
+              46.6247607
+            ],
+            [
+              41.2372523,
+              46.6251399
+            ],
+            [
+              41.2383401,
+              46.6327328
+            ]
+          ]
+        ]
+      }
+    }
+  ],
+  "quality_validation": {
+    "candidates": 9,
+    "accepted": 9,
+    "worldcover_collection": "ESA/WorldCover/v200",
+    "sentinel2_period": [
+      "2024-04-01",
+      "2024-10-30"
+    ]
+  }
+}

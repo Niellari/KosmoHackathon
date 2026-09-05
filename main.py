@@ -137,8 +137,30 @@ def build_parser() -> argparse.ArgumentParser:
     discover.add_argument("--limit", type=int, help="Количество полигонов")
     discover.add_argument("--output", help="Путь к GeoJSON")
     discover.add_argument(
+        "--candidates",
+        help="Готовый GeoJSON кандидатов; пропускает повторный запрос Overpass",
+    )
+    discover.add_argument(
         "--force", action="store_true", help="Перезаписать существующий GeoJSON"
     )
+    discover.add_argument(
+        "--skip-quality-validation",
+        action="store_true",
+        help="Не выполнять WorldCover/Sentinel-2 проверку кандидатов",
+    )
+
+    weather_zones = subparsers.add_parser(
+        "discover-weather-zones",
+        help="Найти вероятные зоны конкурсных AOI по ERA5-Land",
+    )
+    weather_zones.add_argument(
+        "--config", default="configs/weather-zone-search.yaml"
+    )
+    weather_zones.add_argument("--input", default="data/test_dataset.csv")
+    weather_zones.add_argument(
+        "--output", default="artifacts/collection/weather-zones.geojson"
+    )
+    weather_zones.add_argument("--force", action="store_true")
 
     prepare_external = subparsers.add_parser(
         "prepare-external", help="Собрать нормализованный внешний датасет"
@@ -163,6 +185,11 @@ def main() -> None:
         from src.collection.osm_fields import run_discover_fields_command
 
         run_discover_fields_command(args)
+        return
+    if args.command == "discover-weather-zones":
+        from src.collection.weather_zones import run_discover_weather_zones_command
+
+        run_discover_weather_zones_command(args)
         return
     if args.command == "collect":
         from src.collection.runner import run_collect_command

@@ -37,6 +37,10 @@ class PolygonSelectionConfig(StrictModel):
     min_area_ha: float = Field(default=20, gt=0)
     max_area_ha: float = Field(default=500, gt=0)
     min_cropland_fraction: float = Field(default=0.8, ge=0, le=1)
+    strategy: Literal["nearest_center", "spatially_balanced"] = "nearest_center"
+    min_centroid_distance_km: float = Field(default=0, ge=0)
+    grid_cell_km: float = Field(default=10, gt=0)
+    max_per_grid_cell: int = Field(default=1, ge=1)
 
     @model_validator(mode="after")
     def area_range_is_ordered(self) -> "PolygonSelectionConfig":
@@ -50,6 +54,37 @@ class PolygonsConfig(StrictModel):
     id_property: str = Field(default="polygon_id", min_length=1)
     id_prefix: str = Field(default="EXT-", min_length=1)
     selection: PolygonSelectionConfig = PolygonSelectionConfig()
+
+
+class FieldValidationConfig(StrictModel):
+    enabled: bool = False
+    candidate_pool_size: int = Field(default=30, ge=1, le=200)
+    worldcover_collection: str = "ESA/WorldCover/v200"
+    worldcover_band: str = "Map"
+    cropland_class: int = 40
+    scale_m: int = Field(default=10, ge=10, le=1000)
+    min_valid_sentinel2_observations: int = Field(default=12, ge=1)
+
+
+class WeatherZoneSearchConfig(StrictModel):
+    dataset: str = "ECMWF/ERA5_LAND/DAILY_AGGR"
+    temperature_band: str = "temperature_2m"
+    precipitation_band: str = "total_precipitation_sum"
+    grid_step_degrees: float = Field(default=0.2, gt=0, le=2)
+    sample_dates: int = Field(default=24, ge=4, le=120)
+    min_profile_dates: int = Field(default=4, ge=2, le=120)
+    top_zones: int = Field(default=6, ge=1, le=30)
+    min_zone_distance_km: float = Field(default=30, ge=0)
+    min_year: int = Field(default=2019, ge=1950, le=2100)
+    max_year: int = Field(default=2024, ge=1950, le=2100)
+
+    @model_validator(mode="after")
+    def years_are_ordered(self) -> "WeatherZoneSearchConfig":
+        if self.min_year > self.max_year:
+            raise ValueError("weather_zones.min_year должен быть не больше max_year")
+        if self.min_profile_dates > self.sample_dates:
+            raise ValueError("min_profile_dates должен быть не больше sample_dates")
+        return self
 
 
 class PeriodConfig(StrictModel):
@@ -113,6 +148,8 @@ class ProcessingConfig(StrictModel):
 class CollectionConfig(StrictModel):
     region: RegionConfig
     polygons: PolygonsConfig
+    field_validation: FieldValidationConfig = FieldValidationConfig()
+    weather_zones: WeatherZoneSearchConfig = WeatherZoneSearchConfig()
     period: PeriodConfig
     provider: ProviderConfig = ProviderConfig()
     sensors: SensorsConfig = SensorsConfig()

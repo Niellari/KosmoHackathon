@@ -1,15 +1,15 @@
 region:
-  name: egorlykskaya_agriculture
+  name: era5_zone02_agriculture
   bbox:
-    min_lon: 40.20
-    min_lat: 46.20
-    max_lon: 41.10
-    max_lat: 46.64
+    min_lon: 41.05
+    min_lat: 46.35
+    max_lon: 41.35
+    max_lat: 46.65
 
 polygons:
-  path: ../data/external/egorlykskaya/polygons.geojson
+  path: ../data/external/era5-zone02/polygons.geojson
   id_property: polygon_id
-  id_prefix: EXT-EGL-
+  id_prefix: EXT-WZ02-
   selection:
     limit: 10
     min_area_ha: 20
@@ -23,6 +23,10 @@ polygons:
 field_validation:
   enabled: true
   candidate_pool_size: 30
+  worldcover_collection: ESA/WorldCover/v200
+  worldcover_band: Map
+  cropland_class: 40
+  scale_m: 10
   min_valid_sentinel2_observations: 12
 
 period:
@@ -51,9 +55,9 @@ sensors:
     enabled: false
 
 output:
-  raw_directory: ../artifacts/collection/egorlykskaya/raw
-  manifest_directory: ../artifacts/collection/egorlykskaya/manifests
-  dataset_path: ../data/external/processed/egorlykskaya_2019_2024.csv
+  raw_directory: ../artifacts/collection/era5-zone02/raw
+  manifest_directory: ../artifacts/collection/era5-zone02/manifests
+  dataset_path: ../data/external/processed/era5_zone02_2019_2024.csv
   format: csv
 
 execution:

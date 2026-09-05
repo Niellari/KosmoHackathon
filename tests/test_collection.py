@@ -18,9 +18,13 @@ from src.collection.config import (
     RegionConfig,
     load_collection_config,
 )
-from src.collection.osm_fields import build_field_collection
+from src.collection.osm_fields import (
+    build_field_collection,
+    validate_field_collection,
+)
 from src.collection.prepare import build_external_dataset
 from src.collection.runner import collect_observations, load_polygon_features
+from src.collection.weather_zones import match_weather_zones
 
 
 def _feature(polygon_id: str, lon: float = 40.3) -> dict:
@@ -208,6 +212,162 @@ class FieldDiscoveryTests(unittest.TestCase):
             self.assertEqual(properties["polygon_id"], "EXT-0001")
             self.assertEqual(properties["osm_way_id"], 123)
             self.assertEqual(properties["source_license"], "ODbL")
+
+    def test_spatially_balanced_selection_spreads_fields(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            config = CollectionRunnerTests()._config(root, root / "fields.geojson")
+            selection = config.polygons.selection.model_copy(
+                update={
+                    "strategy": "spatially_balanced",
+                    "min_centroid_distance_km": 5,
+                    "grid_cell_km": 5,
+                    "max_per_grid_cell": 1,
+                }
+            )
+            config = config.model_copy(
+                update={
+                    "polygons": config.polygons.model_copy(
+                        update={"selection": selection}
+                    )
+                }
+            )
+
+            def element(osm_id, lon, lat):
+                return {
+                    "id": osm_id,
+                    "geometry": [
+                        {"lon": lon, "lat": lat},
+                        {"lon": lon + 0.01, "lat": lat},
+                        {"lon": lon + 0.01, "lat": lat + 0.01},
+                        {"lon": lon, "lat": lat + 0.01},
+                        {"lon": lon, "lat": lat},
+                    ],
+                }
+
+            payload = {
+                "elements": [
+                    element(1, 40.95, 47.10),
+                    element(2, 40.96, 47.11),
+                    element(3, 40.20, 46.70),
+                    element(4, 42.00, 47.50),
+                ]
+            }
+
+            result = build_field_collection(payload, config=config, limit=3)
+
+            self.assertEqual(len(result["features"]), 3)
+            osm_ids = {
+                feature["properties"]["osm_way_id"]
+                for feature in result["features"]
+            }
+            self.assertFalse({1, 2}.issubset(osm_ids))
+
+    def test_quality_validation_filters_worldcover_and_scene_count(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            config = CollectionRunnerTests()._config(root, root / "fields.geojson")
+            validation = config.field_validation.model_copy(
+                update={"enabled": True, "min_valid_sentinel2_observations": 2}
+            )
+            config = config.model_copy(update={"field_validation": validation})
+            collection = {
+                "type": "FeatureCollection",
+                "name": "test",
+                "features": [_feature("EXT-1"), _feature("EXT-2", 40.5)],
+            }
+
+            class QualityProvider:
+                @staticmethod
+                def cropland_fractions(features, id_property):
+                    return {"EXT-1": 0.95, "EXT-2": 0.40}
+
+                @staticmethod
+                def collect(features, id_property, start_date, end_date):
+                    return pd.DataFrame(
+                        {
+                            "polygon_id": ["EXT-1", "EXT-1", "EXT-2"],
+                            "date": ["2024-04-01", "2024-04-06", "2024-04-01"],
+                        }
+                    )
+
+            result = validate_field_collection(
+                collection, config=config, provider=QualityProvider(), limit=10
+            )
+
+            self.assertEqual(len(result["features"]), 1)
+            properties = result["features"][0]["properties"]
+            self.assertEqual(properties["polygon_id"], "EXT-1")
+            self.assertEqual(properties["cropland_fraction"], 0.95)
+            self.assertEqual(properties["sentinel2_valid_observations"], 2)
+            rejected = result["quality_validation"]["rejected"]
+            self.assertEqual(rejected[0]["polygon_id"], "EXT-2")
+            self.assertIn("low_cropland_fraction", rejected[0]["reasons"])
+
+
+class WeatherZoneTests(unittest.TestCase):
+    def test_weather_profiles_match_separate_candidate_zones(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            config = CollectionRunnerTests()._config(root, root / "fields.geojson")
+            weather = config.weather_zones.model_copy(
+                update={"top_zones": 2, "min_zone_distance_km": 30}
+            )
+            config = config.model_copy(update={"weather_zones": weather})
+            dates = list(pd.date_range("2024-04-01", periods=4, freq="D"))
+            competition_rows = []
+            candidate_rows = []
+            for index, day in enumerate(dates):
+                competition_rows.extend(
+                    [
+                        {
+                            "anon_polygon_id": "AOI-A",
+                            "date": day,
+                            "era5_temp_c": 10 + index,
+                            "era5_precip_mm": index,
+                        },
+                        {
+                            "anon_polygon_id": "AOI-B",
+                            "date": day,
+                            "era5_temp_c": 20 + index,
+                            "era5_precip_mm": 2 * index,
+                        },
+                    ]
+                )
+                candidate_rows.extend(
+                    [
+                        {
+                            "candidate_id": "WEST",
+                            "longitude": 40.0,
+                            "latitude": 47.0,
+                            "date": day,
+                            "era5_temp_c": 10 + index,
+                            "era5_precip_mm": index,
+                        },
+                        {
+                            "candidate_id": "EAST",
+                            "longitude": 42.0,
+                            "latitude": 47.0,
+                            "date": day,
+                            "era5_temp_c": 20 + index,
+                            "era5_precip_mm": 2 * index,
+                        },
+                    ]
+                )
+
+            result = match_weather_zones(
+                pd.DataFrame(competition_rows),
+                pd.DataFrame(candidate_rows),
+                config,
+                dates,
+            )
+
+            self.assertEqual(result["matched_aoi_count"], 2)
+            self.assertEqual(len(result["features"]), 2)
+            self.assertEqual(
+                {feature["properties"]["matched_aoi_count"] for feature in result["features"]},
+                {1},
+            )
 
 
 class ExternalDatasetTests(unittest.TestCase):

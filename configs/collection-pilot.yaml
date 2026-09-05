@@ -15,6 +15,15 @@ polygons:
     min_area_ha: 20
     max_area_ha: 500
     min_cropland_fraction: 0.80
+    strategy: spatially_balanced
+    min_centroid_distance_km: 5
+    grid_cell_km: 10
+    max_per_grid_cell: 1
+
+field_validation:
+  enabled: true
+  candidate_pool_size: 30
+  min_valid_sentinel2_observations: 12
 
 period:
   start: 2024-04-01

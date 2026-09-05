@@ -13,12 +13,11 @@ data:
         polygon_id_prefix: EXT-ZGD-
         sample_weight: 0.50
       - name: egorlykskaya_osm
-        # Будет включён после сбора; вес можно менять независимо через CLI.
-        enabled: false
+        enabled: true
         path: data/external/processed/egorlykskaya_2019_2024.csv
         crop_type_fallback: неизвестно
         polygon_id_prefix: EXT-EGL-
-        sample_weight: 0.25
+        sample_weight: 0.50
 
 features:
 

@@ -84,6 +84,37 @@ class EarthEngineSentinel2Provider:
             image, image.propertyNames()
         )
 
+    def cropland_fractions(
+        self, features: list[dict], id_property: str
+    ) -> dict[str, float | None]:
+        """Доля cropland WorldCover внутри каждого точного контура поля."""
+
+        if not features:
+            return {}
+        validation = self.config.field_validation
+        polygons = self._feature_collection(features, id_property)
+        landcover = (
+            self.ee.ImageCollection(validation.worldcover_collection)
+            .first()
+            .select(validation.worldcover_band)
+        )
+        cropland = landcover.eq(validation.cropland_class).rename(
+            "cropland_fraction"
+        )
+        reduced = cropland.reduceRegions(
+            collection=polygons,
+            reducer=self.ee.Reducer.mean(),
+            scale=validation.scale_m,
+        ).getInfo()
+        result: dict[str, float | None] = {}
+        for feature in reduced.get("features", []):
+            properties = feature.get("properties", {})
+            polygon_id = str(properties.get("polygon_id"))
+            result[polygon_id] = _number(
+                properties.get("cropland_fraction", properties.get("mean"))
+            )
+        return result
+
     def collect(
         self,
         features: list[dict],

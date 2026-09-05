@@ -345,16 +345,41 @@ earthengine authenticate
 export EE_PROJECT_ID="ваш-google-cloud-project"
 ```
 
-Получить 10 открытых OSM-контуров сельхозземель, проходящих ограничения площади
-и bbox из collection-конфига:
+Сначала найти вероятные погодные зоны test-AOI по ERA5-Land. Поиск использует
+только входные погодные признаки, проходит по сетке Ростовской области и
+сохраняет разнесённые центры зон с количеством сопоставленных AOI:
 
 ```bash
-python main.py discover-fields --config configs/collection-pilot.yaml
+EE_PROJECT_ID=your-project-id python main.py discover-weather-zones \
+  --config configs/weather-zone-search.yaml \
+  --input data/test_dataset.csv \
+  --output artifacts/collection/weather-zones.geojson
+```
+
+Для выбранного центра используется отдельный collection-конфиг. Получить
+пространственно разнесённые OSM-контуры, проверить WorldCover и число пригодных
+Sentinel-2 дат:
+
+```bash
+EE_PROJECT_ID=your-project-id python main.py discover-fields \
+  --config configs/collection-era5-zone02.yaml
 ```
 
 Команда использует объекты OpenStreetMap `landuse=farmland` (лицензия ODbL),
-выбирает ближайшие к центру заданного региона и сохраняет источник, OSM way ID и
-расчётную площадь. Существующий файл не перезаписывается без `--force`.
+разносит поля по grid-cell с минимальной дистанцией, сохраняет OSM way ID и
+расчётную площадь. При `field_validation.enabled=true` в GeoJSON также
+записываются `cropland_fraction` из ESA WorldCover и число чистых Sentinel-2
+наблюдений. Существующий файл не перезаписывается без `--force`.
+
+Если Overpass уже отдал кандидатов, их можно проверить повторно без сетевого
+OSM-запроса:
+
+```bash
+EE_PROJECT_ID=your-project-id python main.py discover-fields \
+  --config configs/collection-era5-zone02.yaml \
+  --candidates artifacts/collection/era5-zone02-candidates.geojson \
+  --force
+```
 
 Либо скопировать образец GeoJSON и заменить демонстрационную геометрию вручную.
 Координаты должны быть в WGS84, а каждый объект должен иметь уникальное свойство
@@ -403,10 +428,10 @@ python main.py collect \
 ```
 
 Сборщик проверяет GeoJSON, уникальность идентификаторов, попадание геометрии в
-настроенный bbox и площадь полей. Если у Feature присутствует свойство
-`cropland_fraction`, применяется также минимальный порог из YAML. На первом
-этапе реализован только Sentinel-2; Landsat, MODIS и ERA5 добавляются отдельными
-детерминированными этапами после сравнения пилотных наблюдений с конкурсным train.
+настроенный bbox, площадь полей, минимальную долю cropland и число пригодных
+Sentinel-2 наблюдений. Для спутниковых рядов пока реализован Sentinel-2; ERA5
+используется для выбора зон, а Landsat и MODIS остаются следующими независимыми
+этапами расширения данных.
 
 Преобразовать scene-level наблюдения в ежедневную таблицу схемы train:
 
@@ -426,27 +451,37 @@ python main.py prepare-external \
 создаётся полная ежедневная сетка периода, `primary_ndvi` заполняется из
 `s2_ndvi`, а `crop_type` получает честное значение `неизвестно`. Для нескольких
 лет климатология каждой известной точки считается только по другим годам того
-же поля в окне `doy ± 21`. Результат
-сохраняется в `data/external/processed/external_dataset.csv` и остаётся
+же поля в окне `doy ± 21`. Результат зерноградского сбора сохраняется в
+`data/external/processed/zernograd_2019_2024.csv` и остаётся
 изолированным от конкурсного train до A/B-валидации.
 
-Подключение к обучению задаётся независимо в основном конфиге:
+Каждый географический кластер задаётся отдельным именованным источником со
+своим префиксом полигонов и весом:
 
 ```yaml
 data:
   external:
     enabled: false
-    paths: [data/external/processed/external_dataset.csv]
     usage: training_only
-    crop_type_fallback: неизвестно
-    polygon_id_prefix: EXT-
-    sample_weight: 0.25
+    sources:
+      - name: zernograd_osm
+        enabled: true
+        path: data/external/processed/zernograd_2019_2024.csv
+        crop_type_fallback: неизвестно
+        polygon_id_prefix: EXT-ZGD-
+        sample_weight: 0.50
+      - name: egorlykskaya_osm
+        enabled: true
+        path: data/external/processed/egorlykskaya_2019_2024.csv
+        crop_type_fallback: неизвестно
+        polygon_id_prefix: EXT-EGL-
+        sample_weight: 0.50
 ```
 
 При `enabled: true` external-строки добавляются только в обучающую выборку и не
 попадают в исторический контекст тестовых полигонов. До подтверждения пользы в
-production-конфиге флаг остаётся выключенным. A/B-проверка использует файлы из
-`paths` независимо от production-флага, отключает признаки культуры и оценивает
+production-конфиге флаг остаётся выключенным. A/B-проверка использует активные
+`sources` независимо от production-флага, отключает признаки культуры и оценивает
 обе модели на одинаковых известных точках исходного train:
 
 ```bash
@@ -457,6 +492,31 @@ python main.py validate-external --config config.yaml
 
 ```bash
 python main.py validate-external --config config.yaml --external-weight 0.10
+```
+
+Для независимой проверки источников параметр можно повторять. Вес `0` полностью
+исключает соответствующий источник из обучения:
+
+```bash
+python main.py predict \
+  --config config.yaml \
+  --with-external \
+  --external-source-weight zernograd_osm=0.50 \
+  --external-source-weight egorlykskaya_osm=0.10 \
+  --output artifacts/submission_external_egl_w010.csv
+```
+
+Второй кластер собирается теми же командами с отдельным конфигом:
+
+```bash
+python main.py discover-fields \
+  --config configs/collection-egorlykskaya.yaml --limit 10
+EE_PROJECT_ID=your-project-id python main.py collect-history \
+  --config configs/collection-egorlykskaya.yaml \
+  --years 2019 2020 2021 2022 2023 2024 --limit 10
+python main.py prepare-external \
+  --config configs/collection-egorlykskaya.yaml \
+  --sentinel2 artifacts/collection/egorlykskaya/raw/sentinel2-{2019,2020,2021,2022,2023,2024}.csv
 ```
 
 Сформировать отдельный submission экспериментальной external-моделью, не меняя

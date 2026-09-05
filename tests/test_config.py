@@ -191,7 +191,7 @@ class ConfigTests(unittest.TestCase):
             for source in changed.data.external.sources
         }
         self.assertEqual(weights["zernograd_osm"], 0.5)
-        self.assertEqual(weights["egorlykskaya_osm"], 0.25)
+        self.assertEqual(weights["egorlykskaya_osm"], 0.5)
         with self.assertRaises(ValidationError):
             with_external_weight(config, 1.5)
 
