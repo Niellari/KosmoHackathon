@@ -5,9 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import errno
 import json
+import math
 import os
 import subprocess
 import sys
+import time
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from pathlib import Path
@@ -23,6 +25,7 @@ from bottle import Bottle, HTTPError, request, response, static_file
 from src.config import AppConfig
 from src.pipeline import AnalysisPipeline
 from src.web_geometry import validate_geometry
+from src.field_lookup import choose_field
 from src.monitoring.config import load_monitoring_config, DEFAULT_CONFIG
 from src.monitoring.store import JobStore, QueueFullError
 
@@ -69,6 +72,19 @@ def create_app(
             update={"database": storage.parent / "monitoring-test.sqlite3"}
         )
     jobs = JobStore(monitoring_config)
+
+    @app.get("/api/map-config")
+    def map_config():
+        # Browser map keys are public by design; restrict origins at MapTiler.
+        key = os.environ.get("MAPTILER_API_KEY", "").strip()
+        local_config = web_root.parent / "maptiler.local.json"
+        if not key and local_config.exists():
+            try:
+                key = str(json.loads(local_config.read_text(encoding="utf-8")).get("api_key", "")).strip()
+            except (OSError, ValueError, AttributeError):
+                pass
+        response.set_header("Cache-Control", "no-store")
+        return {"maptiler_key": key}
 
     @app.get("/api/monitoring")
     def monitoring_info():
@@ -136,9 +152,78 @@ def create_app(
                 502, "Источник временно недоступен. Попробуйте ещё раз"
             ) from error
 
+    @app.get("/api/search/plots")
+    def search_plots():
+        query = request.query.getunicode("q", "").strip().casefold().replace("ё", "е")
+        if not 2 <= len(query) <= 150:
+            raise HTTPError(400, "Введите от 2 до 150 символов")
+        with state.lock:
+            matches = [
+                dict(p)
+                for p in state.custom_polygons.values()
+                if query in str(p.get("name", "")).casefold().replace("ё", "е")
+            ]
+        return {"items": matches[:20]}
+
+    suggestions_cache = {}
+    suggestions_lock = Lock()
+
+    @app.get("/api/places/suggest")
+    def suggest_places():
+        query = request.query.getunicode("q", "").strip()
+        if not 2 <= len(query) <= 150:
+            raise HTTPError(400, "Введите от 2 до 150 символов")
+        key = query.casefold()
+        with suggestions_lock:
+            cached = suggestions_cache.get(key)
+            if cached and time.monotonic() - cached[0] < 3600:
+                return cached[1]
+        url = "https://photon.komoot.io/api/?" + urlencode(
+            {"q": query, "limit": 6, "layer": ["city", "state", "country", "locality"]},
+            doseq=True,
+        )
+        try:
+            with urlopen(
+                Request(url, headers={"User-Agent": "AgroPulse-KosmoHackathon/1.0"}),
+                timeout=8,
+            ) as incoming:
+                payload = json.load(incoming)
+        except Exception as error:
+            raise HTTPError(502, "Подсказки городов временно недоступны") from error
+        items = []
+        for feature in payload.get("features", []):
+            p = feature["properties"]
+            if not (p.get("osm_key") == "place" or
+                    (p.get("osm_key") == "boundary" and p.get("osm_value") == "administrative")):
+                continue
+            lon, lat = feature["geometry"]["coordinates"]
+            extent = p.get("extent")
+            items.append(
+                {
+                    "name": ", ".join(
+                        dict.fromkeys(
+                            v
+                            for v in [p.get("name"), p.get("state"), p.get("country")]
+                            if v
+                        )
+                    ),
+                    "lat": lat,
+                    "lon": lon,
+                    "bounds": (
+                        [extent[3], extent[1], extent[0], extent[2]] if extent else None
+                    ),
+                }
+            )
+        result = {"items": items, "source": "Photon / OpenStreetMap"}
+        with suggestions_lock:
+            if len(suggestions_cache) >= 256:
+                suggestions_cache.pop(next(iter(suggestions_cache)))
+            suggestions_cache[key] = (time.monotonic(), result)
+        return result
+
     @app.get("/api/regions")
     def regions():
-        query = request.query.get("q", "").strip()
+        query = request.query.getunicode("q", "").strip()
         if not 2 <= len(query) <= 150:
             raise HTTPError(400, "Введите название места от 2 символов")
         payload = remote_json(
@@ -153,6 +238,11 @@ def create_app(
                     "name": p["display_name"],
                     "lat": float(p["lat"]),
                     "lon": float(p["lon"]),
+                    "bounds": (
+                        [float(v) for v in p["boundingbox"]]
+                        if p.get("boundingbox")
+                        else None
+                    ),
                 }
                 for p in payload
             ]
@@ -161,6 +251,17 @@ def create_app(
     @app.get("/api/fields")
     def fields():
         raw = request.query.get("bbox")
+        point = None
+        if request.query.get("lat") is not None:
+            try:
+                lat, lon = float(request.query.lat), float(request.query.lon)
+                if not (-85 < lat < 85 and -180 < lon < 180):
+                    raise ValueError()
+                point = (lat, lon)
+                dx = 2000 / (111320 * math.cos(math.radians(lat)))
+                raw = f"{max(-85,lat-.018)},{max(-180,lon-dx)},{min(85,lat+.018)},{min(180,lon+dx)}"
+            except (ValueError, TypeError) as error:
+                raise HTTPError(400, "Некорректная точка поиска") from error
         if not raw:
             path = web_root.parent / "data" / "external" / "polygons.geojson"
             return (
@@ -173,8 +274,7 @@ def create_app(
             if not (
                 -85 <= south < north <= 85
                 and -180 <= west < east <= 180
-                and north - south <= 0.3
-                and east - west <= 0.5
+                and (point is not None or (north - south <= 0.3 and east - west <= 0.5))
             ):
                 raise ValueError()
         except ValueError as error:
@@ -184,6 +284,8 @@ def create_app(
             "https://overpass-api.de/api/interpreter",
             urlencode({"data": query}).encode(),
         )
+        if payload.get("remark"):
+            raise HTTPError(502, "OSM не завершил поиск. Попробуйте ещё раз")
         features = []
         for item in payload.get("elements", []):
             geometry = {
@@ -208,6 +310,8 @@ def create_app(
                     },
                 }
             )
+        if point is not None:
+            return choose_field(features, *point)
         return {"type": "FeatureCollection", "features": features}
 
     @app.hook("after_request")

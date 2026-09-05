@@ -14,17 +14,16 @@
   <body class="fields-collapsed">
     <header class="topbar">
       <form id="searchForm" class="search" role="search">
-        <span aria-hidden="true">⌕</span
-        ><input
+        <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><input
           id="regionSearch"
-          aria-label="Регион или населённый пункт"
-          placeholder="Найти регион или населённый пункт"
+          aria-label="Город, страна или сохранённый участок"
+          placeholder="Город, страна или участок"
           minlength="2"
           maxlength="150"
           required
           autocomplete="off"
         /><button id="searchButton">Найти</button>
-        <div id="searchResults" class="search-results" hidden></div>
+        <div id="searchResults" class="search-results" aria-label="Результаты поиска" aria-live="polite" hidden></div>
       </form>
       <button
         id="toggleFields"
@@ -53,6 +52,9 @@
         <div class="map-fallback">Загрузка карты…</div>
       </div>
       <nav class="shape-tools panel" aria-label="Инструменты выделения">
+        <button id="moveTools" class="tools-grip" aria-label="Переместить панель инструментов" title="Перетащите панель · стрелки — перемещение · Home или двойной клик — сброс">
+          <svg width="20" height="12" viewBox="0 0 20 12" fill="currentColor" aria-hidden="true"><circle cx="5" cy="3" r="1.3"/><circle cx="10" cy="3" r="1.3"/><circle cx="15" cy="3" r="1.3"/><circle cx="5" cy="9" r="1.3"/><circle cx="10" cy="9" r="1.3"/><circle cx="15" cy="9" r="1.3"/></svg>
+        </button>
         <button
           data-tool="pan"
           title="Перемещение карты · сбросить выбор поля"
@@ -117,12 +119,18 @@
         >
           ✎
         </button>
+        <button id="discoverButton" title="Найти участок · выберите точку на карте" aria-label="Найти участок" aria-pressed="false">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <path d="M9 3H4a1 1 0 0 0-1 1v5M15 3h5a1 1 0 0 1 1 1v5M21 15v5a1 1 0 0 1-1 1h-5M9 21H4a1 1 0 0 1-1-1v-5"/>
+            <circle cx="12" cy="12" r="4"/><path d="M12 10v4M10 12h4"/>
+          </svg>
+        </button>
       </nav>
       <aside id="fieldsPanel" class="panel fields-panel" aria-label="Мои поля">
         <div class="panel-heading">
-          <p class="eyebrow">РАБОЧЕЕ ПРОСТРАНСТВО</p>
+          <p class="eyebrow">КАТАЛОГ УЧАСТКОВ</p>
           <h1>
-            Сохранённые поля <span id="fieldCount" class="counter">0</span>
+            Участки <span id="fieldCount" class="counter">0</span>
           </h1>
           <button
             id="closeFields"
@@ -132,6 +140,7 @@
             ×
           </button>
         </div>
+        <p class="fields-list-label">СОХРАНЁННЫЕ КОНТУРЫ</p>
         <div id="fieldList" class="field-list"></div>
         <details class="dataset">
           <summary>Конкурсные временные ряды</summary>
@@ -143,25 +152,10 @@
             <option value="">Выберите ряд</option>
           </select>
         </details>
-        <div class="panel-footer">● Контуры: OpenStreetMap · ODbL</div>
+        <div class="panel-footer">АгроПульс <span>Карта · OpenStreetMap / ODbL</span></div>
       </aside>
-      <div class="map-tools">
-        <button id="discoverButton" class="surface-button">
-          ▱ Найти поля на карте</button
-        ><button
-          id="fitButton"
-          class="surface-button"
-          aria-label="Показать все поля"
-        >
-          ⌖
-        </button>
-      </div>
-      <aside
-        id="detailPanel"
-        class="panel detail-panel"
-        aria-label="Выбранное поле"
-        hidden
-      >
+      <dialog id="fieldDialog" class="field-dialog" aria-labelledby="fieldTitle">
+        <header class="field-dialog-header">
         <div class="detail-heading">
           <p id="fieldSource" class="eyebrow">ВЫБРАННОЕ ПОЛЕ</p>
           <button
@@ -173,7 +167,18 @@
           </button>
         </div>
         <h2 id="fieldTitle">Поле</h2>
+        </header>
+        <div class="field-tabs" role="tablist" aria-label="Информация об участке">
+          <button id="fieldInfoTab" type="button" role="tab" aria-selected="true" aria-controls="fieldInfoPane">Общая информация</button>
+          <button id="fieldChartsTab" type="button" role="tab" aria-selected="false" aria-controls="fieldChartsPane" tabindex="-1">Графики</button>
+        </div>
+        <div class="field-dialog-content">
+        <section id="fieldInfoPane" role="tabpanel" aria-labelledby="fieldInfoTab" tabindex="0">
+        <div id="detailPanel" class="panel detail-panel" hidden>
+        <section class="plot-overview-card">
+        <h3>Об участке</h3>
         <p id="fieldDescription" class="muted small"></p>
+        <div id="plotShapePreview" class="plot-shape-preview" aria-label="Контур участка"></div>
         <div class="field-facts">
           <div><span>Площадь</span><strong id="fieldArea">—</strong></div>
           <div>
@@ -188,15 +193,19 @@
         /><button id="saveFieldButton" class="primary wide">
           Добавить в мои поля
         </button>
+        </section>
+        <section class="plot-analysis-card">
+        <h3>Анализ участка</h3>
+        <p class="plot-section-description">Выберите период наблюдений для оценки состояния растительности.</p>
         <div id="analysisControls">
           <label id="yearLabel" for="yearSelect">Сезон анализа</label
           ><select id="yearSelect"></select>
           <div id="realPeriod" hidden>
-            <label for="startDate">Начало периода</label
-            ><input id="startDate" type="date" min="2018-01-01" /><label
+            <div class="plot-period-grid"><div><label for="startDate">Начало периода</label
+            ><input id="startDate" type="date" min="2018-01-01" /></div><div><label
               for="endDate"
               >Конец периода</label
-            ><input id="endDate" type="date" min="2018-01-01" />
+            ><input id="endDate" type="date" min="2018-01-01" /></div></div>
             <p class="muted small">
               Sentinel-2 + ERA5-Land. История поля загружается автоматически.
             </p>
@@ -216,10 +225,17 @@
         <div id="fieldSummary" hidden></div>
         <div id="anomalyList" class="anomaly-list"></div>
         <div id="dataNotes" class="muted small" hidden></div>
+        </section>
         <button id="deleteButton" class="danger wide" hidden>
           Удалить из моих полей
         </button>
-      </aside>
+        </div>
+        </section>
+        <section id="fieldChartsPane" role="tabpanel" aria-labelledby="fieldChartsTab" tabindex="0" hidden>
+          <div id="chartsEmpty" class="charts-empty"><strong>Графики появятся после анализа</strong><p>Выберите период и запустите анализ на вкладке «Общая информация».</p><button id="goToFieldInfo" type="button">К общей информации</button></div>
+        </section>
+        </div>
+      </dialog>
       <section
         id="drawToolbar"
         class="draw-toolbar panel"
@@ -239,9 +255,6 @@
           Сохранить поле
         </button>
       </section>
-      <div id="mapHint" class="map-hint">
-        Нажмите на контур поля, чтобы открыть его карточку
-      </div>
       <section
         id="chartPanel"
         class="chart-panel panel"
@@ -273,9 +286,48 @@
           </p>
         </div>
       </section>
+      <div class="settings-control">
+        <button id="settingsButton" class="settings-button" aria-label="Настройки карты" title="Настройки" aria-expanded="false" aria-controls="settingsPanel">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 3-.6 2.2-1.5.9-2.2-.6-3 5.1 1.6 1.6v1.8l-1.6 1.6 3 5.1 2.2-.6 1.5.9L9 23h6l.6-2.2 1.5-.9 2.2.6 3-5.1-1.6-1.6V12l1.6-1.6-3-5.1-2.2.6-1.5-.9L15 3Z" transform="translate(1 0) scale(.9)"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+      </div>
     </main>
-    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+        <dialog id="settingsPanel" class="settings-panel" aria-labelledby="settingsTitle">
+          <div class="settings-heading"><h2 id="settingsTitle">Настройки</h2><button id="closeSettings" aria-label="Закрыть настройки">×</button></div>
+          <p class="settings-intro">Настройте интерфейс и карту под себя.</p>
+          <section class="settings-section">
+          <h3>Интерфейс</h3>
+          <label class="settings-row language-row" for="languageSelect"><span><strong>Язык интерфейса</strong><small>Применяется сразу, без перезагрузки</small></span><select id="languageSelect"><option value="ru">Русский</option><option value="en">English</option></select></label>
+          </section>
+          <section class="settings-section">
+          <h3 id="mapLayersTitle">Слои карты</h3>
+          <p class="layer-description">Выберите оформление подложки. Ваши участки останутся на карте.</p>
+          <div class="basemap-options" role="group" aria-labelledby="mapLayersTitle">
+            <button type="button" class="basemap-option" data-basemap="satellite" aria-pressed="false"><span class="basemap-preview preview-satellite" aria-hidden="true"></span><strong>Спутник</strong><small>MapTiler · фотоснимки</small></button>
+            <button type="button" class="basemap-option" data-basemap="standard" aria-pressed="true"><span class="basemap-preview preview-standard" aria-hidden="true"></span><strong>Стандартный</strong><small>OpenStreetMap</small></button>
+            <button type="button" class="basemap-option" data-basemap="light" aria-pressed="false"><span class="basemap-preview preview-light" aria-hidden="true"></span><strong>Светлый</strong><small>OSM · светлая палитра</small></button>
+            <button type="button" class="basemap-option" data-basemap="dark" aria-pressed="false"><span class="basemap-preview preview-dark" aria-hidden="true"></span><strong>Тёмный</strong><small>OSM · тёмная палитра</small></button>
+            <button type="button" class="basemap-option" data-basemap="topo" aria-pressed="false"><span class="basemap-preview preview-topo" aria-hidden="true"></span><strong>Топографический</strong><small>OpenTopoMap</small></button>
+          </div>
+          <p id="basemapStatus" class="layer-description" role="status" aria-live="polite"></p>
+          <p class="layer-description">Спутник: снимки разных дат, не в реальном времени. Детализация зависит от региона.</p>
+          </section>
+          <section class="settings-section">
+          <h3>Объекты на карте</h3>
+          <label class="settings-row" for="showOsmFields"><span><strong>Контуры OSM</strong><small>Сохранённые участки видны всегда</small></span><input id="showOsmFields" type="checkbox" checked /></label>
+          </section>
+          <section class="settings-section">
+          <h3>Рабочее пространство</h3>
+          <button id="resetTools" class="reset-tools">Вернуть панель инструментов на место</button>
+          </section>
+          <p class="settings-footnote">Настройки сохраняются в этом браузере.</p>
+        </dialog>
+    <div id="toast" class="toast">
+      <span id="toastMessage" role="status" aria-live="polite" aria-atomic="true"></span>
+      <button id="closeToast" type="button" aria-label="Закрыть уведомление" title="Закрыть уведомление"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+    </div>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="/static/i18n.js"></script>
     <script src="/static/app.js"></script>
   </body>
 </html>

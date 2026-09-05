@@ -3,6 +3,110 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
+test("Delete removes draft, routes saved selection and ignores text input", () => {
+  const {run} = setup();
+  run(`let removed=0, requested=0;
+    stopDrawing=()=>{removed++;state.drawing=false;};
+    deleteSelected=()=>requested++;
+    toast=()=>{};
+    const key={key:'Delete',target:{closest:()=>null},preventDefault(){}};
+    state.drawing=true; deleteSelectionOnKey(key);`);
+  assert.equal(run('removed'),1);
+  run(`state.current={id:'saved',source:'user_geometry'};deleteSelectionOnKey(key);`);
+  assert.equal(run('requested'),1);
+  run(`deleteSelectionOnKey({...key,target:{closest:()=>({})}});
+    deleteSelectionOnKey({...key,repeat:true});
+    state.savingDraft=true;deleteSelectionOnKey(key);`);
+  assert.equal(run('requested'),1);
+});
+test("saved deletion asks for confirmation before any request", async () => {
+  const {run} = setup();
+  run(`let prompts=0, requests=0; state.current={id:'saved',name:'Test',source:'user_geometry'};
+    confirm=()=>{prompts++;return false;}; api=async()=>{requests++;};`);
+  await run('deleteSelected()');
+  assert.equal(run('prompts'),1);
+  assert.equal(run('requests'),0);
+});
+test("location is requested once on click and recovers after denial", () => {
+  const {run} = setup();
+  run(`let calls=0, failure, message;
+    navigator={geolocation:{getCurrentPosition(success,error,options){calls++;failure=error;}}};
+    toast=text=>{message=text;};
+    const locationButton={disabled:false,setAttribute(){}};
+    locateUser(locationButton);locateUser(locationButton);`);
+  assert.equal(run('calls'), 1);
+  assert.equal(run('locationButton.disabled'), true);
+  run('failure({code:1})');
+  assert.equal(run('locationButton.disabled'), false);
+  assert.match(run('message'), /запрещён/);
+});
+test("location success centers the map and replaces the previous marker", () => {
+  const {run} = setup();
+  run(`let centered, removed=0;
+    navigator={geolocation:{getCurrentPosition(success){success({coords:{latitude:55,longitude:37,accuracy:20}});}}};
+    L.circle=()=>({});L.circleMarker=()=>({});
+    L.featureGroup=()=>({addTo(){return this;}});
+    state.map={setView(point,zoom){centered={point,zoom};}};
+    state.locationLayer={remove(){removed++;}};
+    locateUser({disabled:false,setAttribute(){}});`);
+  assert.equal(run('removed'), 1);
+  assert.equal(run('centered.zoom'), 16);
+  assert.equal(run('centered.point[0]'), 55);
+});
+test("basemap palettes reuse tiles and switching sources preserves plot selection", () => {
+  const {run} = setup();
+  run(`let created=0,removed=0;const pane={dataset:{}};
+    document.querySelectorAll=()=>[];
+    state.map.getPane=()=>pane;
+    state.current={id:'kept'};
+    L.tileLayer=(url,options)=>{created++;return {on(){},addTo(){},remove(){removed++;}};};
+    setBasemap('standard');setBasemap('dark');`);
+  assert.equal(run('created'),1);
+  assert.equal(run('pane.dataset.palette'),'dark');
+  run("setBasemap('topo')");
+  assert.equal(run('created'),2);
+  assert.equal(run('removed'),1);
+  assert.equal(run('state.current.id'),'kept');
+  run("setBasemap('invalid')");
+  assert.equal(run('state.basemapId'),'standard');
+});
+test("catalog zoom keeps a roughly 500 m scale at different latitudes", () => {
+  const {run} = setup();
+  for (const latitude of [0, 46.85, 55.75, 65]) {
+    const zoom = run(`catalogZoom(${latitude})`);
+    const meters = 156543.03392 * Math.cos(latitude * Math.PI / 180) * 100 / 2 ** zoom;
+    assert.ok(meters >= 500 && meters < 1000);
+  }
+});
+test("satellite requires a key and uses an unfiltered attributed layer", () => {
+  const {run} = setup();
+  run(`window={};let tileUrl, tileOptions; const pane={dataset:{}};
+    document.querySelectorAll=()=>[]; state.map.getPane=()=>pane;
+    state.basemapLayer={remove(){}};state.basemapSource='osm';
+    setBasemap('satellite');`);
+  assert.equal(run('state.basemapSource'), 'osm');
+  run(`state.maptilerKey='test-key';
+    L.tileLayer=(url,options)=>{tileUrl=url;tileOptions=options;return {on(){},addTo(){}};};
+    setBasemap('satellite');`);
+  assert.match(run('tileUrl'), /satellite-v2/);
+  assert.match(run('tileOptions.attribution'), /MapTiler/);
+  assert.equal(run('pane.dataset.palette'), 'standard');
+});
+test("field tabs switch panels without clearing analysis", () => {
+  const {run} = setup();
+  run(`const tabNodes={};
+    document.getElementById=id=>tabNodes[id] ||= {hidden:false,setAttribute(key,value){this[key]=value;},focus(){}};
+    let chartRenders=0;renderChart=()=>chartRenders++;
+    state.points=[{date:'2024-05-01',observed:.6}];
+    setFieldTab('charts');`);
+  assert.equal(run('tabNodes.fieldInfoPane.hidden'),true);
+  assert.equal(run('tabNodes.fieldChartsPane.hidden'),false);
+  assert.equal(run('tabNodes.fieldChartsTab["aria-selected"]'),'true');
+  assert.equal(run('chartRenders'),1);
+  run("setFieldTab('info')");
+  assert.equal(run('tabNodes.fieldChartsPane.hidden'),true);
+  assert.equal(run('state.points.length'),1);
+});
 function setup() {
   const point = (x, y) => ({
     x,

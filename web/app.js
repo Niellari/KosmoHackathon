@@ -16,6 +16,7 @@ const state = {
   analysisToken: 0,
   shapeKind: "polygon",
   activeTool: "select",
+  lookupToken: 0,
   freehandPointer: null,
   vertexEditing: false,
   history: [],
@@ -34,10 +35,15 @@ const number = (value, digits = 1) =>
     : "—";
 let toastTimer;
 function toast(message) {
-  $("toast").textContent = message;
+  $("toastMessage").textContent = message;
   $("toast").classList.add("show");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => $("toast").classList.remove("show"), 5500);
+  toastTimer = setTimeout(closeToast, 5500);
+}
+function closeToast() {
+  clearTimeout(toastTimer);
+  $("toast").classList.remove("show");
+  $("toastMessage").textContent = "";
 }
 async function api(path, options = {}) {
   const controller = new AbortController();
@@ -65,19 +71,21 @@ function initMap() {
   if (!window.L) {
     $("map").innerHTML =
       '<div class="map-fallback">Карта недоступна. Проверьте интернет и обновите страницу.</div>';
-    ["discoverButton", "fitButton"].forEach((id) => ($(id).disabled = true));
+    $("discoverButton").disabled = true;
     return;
   }
   $("map").replaceChildren();
   state.map = L.map("map", { zoomControl: false }).setView([46.85, 40.32], 12);
-  L.control.zoom({ position: "bottomright" }).addTo(state.map);
+  initNavigationControls();
   L.control.scale({ position: "bottomleft", imperial: false }).addTo(state.map);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution:
-      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-  }).addTo(state.map);
+  let savedBasemap = "standard";
+  try { savedBasemap = localStorage.getItem("agropulse.basemap") || "standard"; } catch {}
+  setBasemap(savedBasemap);
+  document.querySelectorAll("[data-basemap]").forEach(button => {
+    button.onclick = () => setBasemap(button.dataset.basemap);
+  });
   state.map.on("click", (event) => {
+    if (state.activeTool === "lookup") { lookupField(event.latlng); return; }
     if (state.drawing && !state.closed && state.shapeKind !== "freehand") {
       if (state.vertices.length >= 1000) {
         toast("Достигнут предел: 1000 вершин");
@@ -106,6 +114,118 @@ function initMap() {
     if (state.drawing && state.closed) renderDraft();
   });
   initFreehand();
+}
+const BASEMAPS = {
+  satellite: { source: "satellite", palette: "standard" },
+  standard: { source: "osm", palette: "standard" },
+  light: { source: "osm", palette: "light" },
+  dark: { source: "osm", palette: "dark" },
+  topo: { source: "topo", palette: "standard" },
+};
+function setBasemap(requested) {
+  if (!state.map) return;
+  const id = Object.hasOwn(BASEMAPS, requested) ? requested : "standard";
+  const config = BASEMAPS[id];
+  if (id === "satellite" && !state.maptilerKey) {
+    $("basemapStatus").textContent = window.AgroI18n?.translate("Спутник недоступен: проверьте локальную настройку ключа MapTiler.") || "Спутник недоступен: проверьте локальную настройку ключа MapTiler.";
+    if (!state.basemapLayer) setBasemap("standard");
+    return;
+  }
+  state.basemapId = id;
+  $("basemapStatus").textContent = "";
+  // Reuse OSM tiles across palette changes, without touching vector overlays.
+  if (state.basemapSource !== config.source) {
+    if (state.basemapLayer) state.basemapLayer.remove();
+    const topo = config.source === "topo";
+    const satellite = config.source === "satellite";
+    const osmCredit = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+    const layer = L.tileLayer(satellite
+      ? `https://api.maptiler.com/tiles/satellite-v2/{z}/{x}/{y}.jpg?key=${encodeURIComponent(state.maptilerKey)}`
+      : topo
+      ? "https://tile.opentopomap.org/{z}/{x}/{y}.png"
+      : "https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      maxNativeZoom: topo ? 17 : 19,
+      attribution: satellite ? '<a href="https://www.maptiler.com/"><img class="maptiler-logo" src="https://api.maptiler.com/resources/logo.svg" alt="MapTiler" /></a> &copy; <a href="https://www.maptiler.com/copyright/">MapTiler</a> | ' + osmCredit : osmCredit + (topo ? ', SRTM | <a href="https://opentopomap.org">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>)' : ""),
+    });
+    state.basemapLayer = layer;
+    state.basemapSource = config.source;
+    let warned = false;
+    layer.on("tileerror", () => {
+      if (state.basemapLayer !== layer || warned) return;
+      warned = true;
+      $("basemapStatus").textContent = window.AgroI18n?.translate("Часть карты не загрузилась. Попробуйте другой слой или проверьте интернет.") || "Часть карты не загрузилась. Попробуйте другой слой или проверьте интернет.";
+    });
+    layer.addTo(state.map);
+  }
+  state.map.getPane("tilePane").dataset.palette = config.palette;
+  document.querySelectorAll("[data-basemap]").forEach(button => {
+    button.setAttribute("aria-pressed", String(button.dataset.basemap === id));
+  });
+  try { localStorage.setItem("agropulse.basemap", id); } catch {}
+}
+function initNavigationControls() {
+  const control = L.control({ position: "bottomright" });
+  control.onAdd = () => {
+    const container = L.DomUtil.create("div", "map-navigation");
+    container.innerHTML = `<div class="map-zoom-group"><button type="button" data-nav="in"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M12 5v14"/></svg></button><button type="button" data-nav="out"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg></button></div><button type="button" class="map-locate" data-nav="locate"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20 4-6 16-3-7-7-3Z"/></svg></button>`;
+    L.DomEvent.disableClickPropagation(container);
+    L.DomEvent.disableScrollPropagation(container);
+    const zoomIn = container.querySelector('[data-nav="in"]');
+    const zoomOut = container.querySelector('[data-nav="out"]');
+    const locate = container.querySelector('[data-nav="locate"]');
+    const labels = () => {
+      [[zoomIn, "Приблизить"], [zoomOut, "Отдалить"], [locate, "Моё местоположение"]].forEach(([button, label]) => {
+        const text = window.AgroI18n?.translate(label) || label;
+        button.title = text;
+        button.setAttribute("aria-label", text);
+      });
+    };
+    labels();
+    document.addEventListener("agropulse:languagechange", labels);
+    zoomIn.onclick = () => state.map.zoomIn();
+    zoomOut.onclick = () => state.map.zoomOut();
+    const updateZoom = () => {
+      zoomIn.disabled = state.map.getZoom() >= state.map.getMaxZoom();
+      zoomOut.disabled = state.map.getZoom() <= state.map.getMinZoom();
+    };
+    state.map.on("zoomend zoomlevelschange", updateZoom);
+    updateZoom();
+    locate.onclick = () => locateUser(locate);
+    return container;
+  };
+  control.addTo(state.map);
+}
+function locateUser(button) {
+  if (button.disabled) return;
+  if (!navigator.geolocation) {
+    toast("Геолокация недоступна в этом браузере. Используйте HTTPS или localhost.");
+    return;
+  }
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+  const finish = () => {
+    button.disabled = false;
+    button.setAttribute("aria-busy", "false");
+  };
+  // One-shot request, only on an explicit click; no tracking or server persistence.
+  navigator.geolocation.getCurrentPosition(position => {
+    finish();
+    const point = [position.coords.latitude, position.coords.longitude];
+    if (state.locationLayer) state.locationLayer.remove();
+    state.locationLayer = L.featureGroup([
+      L.circle(point, { radius: position.coords.accuracy, color: "#4285ed", weight: 1, fillOpacity: 0.08, interactive: false }),
+      L.circleMarker(point, { radius: 7, color: "#fff", weight: 3, fillColor: "#4285ed", fillOpacity: 1, interactive: false }),
+    ]).addTo(state.map);
+    state.map.setView(point, 16);
+  }, error => {
+    finish();
+    toast(error.code === 1
+      ? "Доступ к местоположению запрещён. Разрешите его в настройках браузера."
+      : error.code === 3
+        ? "Не удалось определить местоположение вовремя. Попробуйте ещё раз."
+        : "Местоположение недоступно. Проверьте настройки геолокации устройства.");
+  }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
 }
 function initFreehand() {
   const container = state.map.getContainer();
@@ -224,7 +344,7 @@ function polygonStyle(item) {
   };
 }
 function allFields() {
-  return [...state.fields, ...state.polygons.filter((p) => p.geometry)];
+  return [...(state.showOsmFields === false ? [] : state.fields), ...state.polygons.filter((p) => p.geometry)];
 }
 function renderMap() {
   if (!state.map) return;
@@ -238,7 +358,7 @@ function renderMap() {
     tip.textContent = `${item.name || item.id} · ${number(item.area_ha)} га`;
     layer.bindTooltip(tip);
     layer.on("click", () => {
-      if (!state.drawing && state.activeTool !== "pan") selectField(item);
+      if (!state.drawing && !["pan", "lookup"].includes(state.activeTool)) selectField(item);
     });
     state.layers.set(item.id, layer);
   });
@@ -296,16 +416,16 @@ function renderList() {
     ? saved
         .map(
           (p) =>
-            `<button class="field-item ${state.current?.id === p.id ? "active" : ""}" data-id="${escapeHtml(p.id)}"><span class="field-thumbnail">${fieldThumbnail(p.geometry)}</span><span><strong>${escapeHtml(p.name || p.id)}</strong><small>${number(p.area_ha)} га · Контур сохранён</small></span></button>`,
+            `<button class="field-item ${state.current?.id === p.id ? "active" : ""}" data-id="${escapeHtml(p.id)}"><span class="field-thumbnail">${fieldThumbnail(p.geometry)}</span><span class="field-card-text"><strong>${escapeHtml(p.name || p.id)}</strong><small>${number(p.area_ha)} <span>га</span></small></span><span class="field-card-arrow" aria-hidden="true">↗</span></button>`,
         )
         .join("")
-    : '<p class="empty">Сохранённых полей пока нет.<br>Добавьте первое поле с карты.</p>';
+    : '<div class="fields-empty"><span aria-hidden="true">⬠</span><strong>Здесь появятся ваши поля</strong><p>Сохраните контур на карте — он появится в каталоге.</p></div>';
   $("fieldList")
     .querySelectorAll("button")
     .forEach(
       (button) =>
         (button.onclick = () =>
-          selectField(saved.find((p) => p.id === button.dataset.id))),
+          selectField(saved.find((p) => p.id === button.dataset.id), { fromCatalog: true })),
     );
 }
 async function loadPolygons() {
@@ -325,6 +445,7 @@ async function loadPolygons() {
   $("polygonSelect").value = selected;
 }
 function clearAnalysis() {
+  $("chartsEmpty").hidden = false;
   clearTimeout(state.pollTimer);
   $("jobProgress").hidden = true;
   $("dataNotes").hidden = true;
@@ -336,18 +457,26 @@ function clearAnalysis() {
   document.querySelector(".workspace").classList.remove("has-chart");
   $("fieldSummary").hidden = true;
   $("anomalyList").replaceChildren();
-  $("mapHint").hidden = false;
 }
-function selectField(item) {
+// Leaflet's default scale is 100 px wide; keep roughly 500 m on that ruler.
+function catalogZoom(latitude) {
+  const metersPerPixel = 156543.03392 * Math.cos(latitude * Math.PI / 180);
+  return Math.max(0, Math.min(19, Math.floor(Math.log2(metersPerPixel * 100 / 500))));
+}
+function selectField(item, { fromCatalog = false } = {}) {
   if (state.drawing || !item) return;
   setFieldsOpen(false);
   clearAnalysis();
   state.current = item;
   $("detailPanel").hidden = false;
+  setFieldTab("info");
+  if (!$("fieldDialog").open) $("fieldDialog").showModal();
   document.body.classList.add("has-detail");
   const dataset = item.source === "competition_dataset",
     saved = item.source === "user_geometry";
   $("fieldTitle").textContent = item.name || item.id;
+  $("plotShapePreview").hidden = !item.geometry;
+  $("plotShapePreview").innerHTML = item.geometry ? fieldThumbnail(item.geometry) : "";
   $("fieldSource").textContent = dataset
     ? "КОНКУРСНЫЙ ВРЕМЕННОЙ РЯД"
     : saved
@@ -398,12 +527,13 @@ function selectField(item) {
     state.map.fitBounds(layer.getBounds(), {
       paddingTopLeft: mobile ? [30, 60] : [320, 70],
       paddingBottomRight: mobile ? [30, 120] : [340, 50],
-      maxZoom: 16,
+      maxZoom: fromCatalog ? catalogZoom(layer.getBounds().getCenter().lat) : 16,
     });
   }
   if (saved) resumeAnalysis(item, state.analysisToken);
 }
 function closeDetail() {
+  $("fieldDialog").close();
   clearTimeout(state.pollTimer);
   state.current = null;
   state.analysisToken++;
@@ -445,51 +575,100 @@ async function saveSelected() {
 }
 async function deleteSelected() {
   const item = state.current;
-  if (!item || item.source !== "user_geometry") return;
+  if (!item || item.source !== "user_geometry" || state.deletingField) return;
   if (!confirm(`Удалить «${item.name || item.id}» из моих полей?`)) return;
+  state.deletingField = true;
   $("deleteButton").disabled = true;
   try {
     await api(`/api/polygons/${encodeURIComponent(item.id)}`, {
       method: "DELETE",
     });
-    clearAnalysis();
-    closeDetail();
+    if (state.current?.id === item.id) { clearAnalysis(); closeDetail(); }
     await loadPolygons();
     toast("Сохранённый контур удалён");
   } catch (error) {
     toast(error.message);
   } finally {
+    state.deletingField = false;
     $("deleteButton").disabled = false;
   }
 }
+let searchVersion = 0;
+let searchTimer;
+function savedSearchMatches(query) {
+  const normalized = query.toLocaleLowerCase("ru").replaceAll("ё", "е");
+  return state.polygons.filter(p => p.geometry && (p.name || "").toLocaleLowerCase("ru").replaceAll("ё", "е").includes(normalized)).slice(0,20);
+}
+function showSearchResults(items, message = "") {
+  const results = $("searchResults");
+  results.replaceChildren();
+  let lastGroup = "";
+  items.forEach(item => {
+    const group = item.geometry ? "Ваши участки" : "Города и страны";
+    if (group !== lastGroup) {
+      const heading = document.createElement("p"); heading.className = "search-note"; heading.textContent = group;
+      results.append(heading); lastGroup = group;
+    }
+    const button = document.createElement("button");
+    button.type = "button";
+    const title = document.createElement("strong"), subtitle = document.createElement("small");
+    title.textContent = item.name;
+    subtitle.textContent = item.geometry ? `Сохранённый участок · ${number(item.area_ha)} га` : "Город / регион / страна";
+    button.append(title, subtitle);
+    button.onclick = () => {
+      if (state.drawing) {
+        if (state.vertices.length && !confirm("Отменить несохранённый контур и перейти к результату поиска?")) return;
+        stopDrawing();
+      }
+      if (state.activeTool === "lookup") setTool("select");
+      searchVersion++;
+      results.hidden = true;
+      $("regionSearch").value = item.name;
+      if (item.geometry) selectField(item);
+      else {
+        clearAnalysis(); closeDetail(); setFieldsOpen(false);
+        if (item.bounds?.length === 4) {
+          const [south,north,west,east] = item.bounds;
+          state.map.fitBounds([[south,west],[north,east]], {padding:[75,90],maxZoom:13});
+        } else state.map.setView([item.lat,item.lon],10);
+      }
+    };
+    results.append(button);
+  });
+  if (message) {
+    const note = document.createElement("p"); note.className = "search-note"; note.textContent = message; results.append(note);
+  }
+  results.hidden = false;
+}
+function suggestSavedPlots() {
+  const version = ++searchVersion;
+  clearTimeout(searchTimer);
+  const query = $("regionSearch").value.trim();
+  if (query.length < 2) { $("searchResults").hidden = true; return; }
+  const matches = savedSearchMatches(query);
+  showSearchResults(matches, "Ищем города и страны…");
+  searchTimer = setTimeout(() => {
+    if (version === searchVersion) searchRegion(null);
+  }, 700);
+}
 async function searchRegion(event) {
-  event.preventDefault();
+  event?.preventDefault();
+  clearTimeout(searchTimer);
   if (!state.map) return;
-  $("searchButton").disabled = true;
-  $("searchResults").hidden = true;
+  const version = ++searchVersion;
+  const query = $("regionSearch").value.trim();
+  if (query.length < 2) return;
+  const matches = savedSearchMatches(query);
+  showSearchResults(matches, "Ищем города и страны…");
   try {
     const payload = await api(
-      `/api/regions?q=${encodeURIComponent($("regionSearch").value.trim())}`,
+      `/api/places/suggest?q=${encodeURIComponent(query)}`,
     );
-    $("searchResults").replaceChildren();
-    if (!payload.items.length) {
-      toast("Место не найдено. Уточните название");
-      return;
-    }
-    payload.items.forEach((item) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.textContent = item.name;
-      button.onclick = () => {
-        $("searchResults").hidden = true;
-        state.map.setView([item.lat, item.lon], 13);
-        discoverFields();
-      };
-      $("searchResults").append(button);
-    });
-    $("searchResults").hidden = false;
+    if (version !== searchVersion) return;
+    const items = [...savedSearchMatches(query), ...payload.items];
+    showSearchResults(items, items.length ? "Геопоиск: Photon · OpenStreetMap" : "Ничего не найдено. Попробуйте другое название.");
   } catch (error) {
-    toast(error.message);
+    if (version === searchVersion) showSearchResults(savedSearchMatches(query), `Города временно недоступны. ${error.message}`);
   } finally {
     $("searchButton").disabled = false;
   }
@@ -504,34 +683,37 @@ function convertFields(payload) {
     years: [],
   }));
 }
-async function discoverFields() {
+function discoverFields() {
   if (!state.map || state.drawing) return;
-  const b = state.map.getBounds();
-  if (b.getNorth() - b.getSouth() > 0.3 || b.getEast() - b.getWest() > 0.5) {
-    toast("Приблизьте карту: поиск работает в пределах района");
-    return;
-  }
-  $("discoverButton").disabled = true;
-  $("discoverButton").textContent = "Ищем контуры…";
+  if (state.activeTool === "lookup") { setTool("select"); return; }
+  clearAnalysis(); closeDetail(); setFieldsOpen(false);
+  setTool("lookup");
+  state.map.getContainer().style.cursor = "crosshair";
+  toast("Нажмите внутри участка. Если контура под точкой нет, ищем ближайший в пределах 500 м. Esc — отмена.");
+}
+async function lookupField(point) {
+  if (state.lookupPending) return;
+  state.lookupPending = true;
+  const token = ++state.lookupToken;
+  updateLookupButton(true);
   try {
     const payload = await api(
-      `/api/fields?bbox=${[b.getSouth(), b.getWest(), b.getNorth(), b.getEast()].join(",")}`,
+      `/api/fields?lat=${point.lat}&lon=${point.lng}`,
     );
-    const incoming = convertFields(payload);
-    state.fields = [
-      ...new Map([...state.fields, ...incoming].map((f) => [f.id, f])).values(),
-    ];
-    renderMap();
-    toast(
-      incoming.length
-        ? `Найдено полей: ${incoming.length}`
-        : "В этой области OSM не содержит контуров. Нарисуйте своё поле.",
-    );
+    if (token !== state.lookupToken || state.activeTool !== "lookup") return;
+    if (!payload.feature) { toast("Рядом не найден подходящий контур OSM. Выберите другую точку или обведите участок вручную."); return; }
+    setTool("select");
+    startDrawing("polygon");
+    state.vertices = payload.feature.geometry.coordinates[0].slice(0,-1).map(([lng,lat])=>[lat,lng]);
+    state.closed = true;
+    renderDraft();
+    state.map.fitBounds(state.line.getBounds(), {padding:[90,100],maxZoom:16});
+    toast(payload.match === "contains" ? "Найден контур OSM под точкой. Проверьте границу и сохраните участок." : `Предложен ближайший контур OSM — ${payload.distance_m} м от точки. Проверьте, что это нужный участок.`);
   } catch (error) {
-    toast(error.message);
+    if (token === state.lookupToken) toast(error.message);
   } finally {
-    $("discoverButton").disabled = false;
-    $("discoverButton").textContent = "▱ Найти поля на карте";
+    state.lookupPending = false;
+    if (token === state.lookupToken) updateLookupButton(false);
   }
 }
 
@@ -618,8 +800,22 @@ function basicShape(first, last) {
     return [ll.lat, ll.lng];
   });
 }
+function updateLookupButton(busy = false) {
+  const button = $("discoverButton");
+  const label = busy ? "Ищем участок… Нажмите для отмены" : state.activeTool === "lookup"
+    ? "Выберите точку на карте · нажмите для отмены" : "Найти участок · выберите точку на карте";
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  button.setAttribute("aria-busy", String(busy));
+}
 function setTool(tool) {
+  if (state.activeTool === "lookup" && tool !== "lookup") {
+    state.lookupToken++;
+    state.map.getContainer().style.cursor = "";
+  }
   state.activeTool = tool;
+  updateLookupButton();
+  $("discoverButton").setAttribute("aria-pressed", String(tool === "lookup"));
   document.querySelectorAll("[data-tool]").forEach((button) => {
     button.setAttribute("aria-pressed", String(button.dataset.tool === tool));
   });
@@ -876,7 +1072,8 @@ function stopDrawing() {
   state.map.getContainer().style.cursor = "";
 }
 async function saveDraft() {
-  if (!state.closed || !draftInfo().valid) return;
+  if (!state.closed || !draftInfo().valid || state.savingDraft) return;
+  state.savingDraft = true;
   const ring = state.vertices.map(([lat, lng]) => [lng, lat]);
   ring.push([...ring[0]]);
   $("saveButton").disabled = true;
@@ -892,6 +1089,8 @@ async function saveDraft() {
   } catch (error) {
     toast(error.message);
     updateDraftInfo();
+  } finally {
+    state.savingDraft = false;
   }
 }
 
@@ -951,11 +1150,11 @@ function displayResult(result, title) {
   state.periods = anomalyPeriods(state.points);
   $("chartTitle").textContent = `${title} · NDVI`;
   $("chartPanel").hidden = false;
+  $("chartsEmpty").hidden = true;
   $("chartBody").hidden = false;
   $("toggleChart").setAttribute("aria-expanded", "true");
   $("chartChevron").textContent = "⌄";
   document.querySelector(".workspace").classList.add("has-chart");
-  $("mapHint").hidden = true;
   $("fieldSummary").hidden = false;
   $("fieldSummary").innerHTML = [
     [result.summary.observations, "наблюдений"],
@@ -993,10 +1192,6 @@ function displayResult(result, title) {
     if (result.summary.missing)
       $("analysisNotice").textContent +=
         ` Без восстановления: ${result.summary.missing} дат.`;
-    $("detailPanel").scrollTop = Math.max(
-      0,
-      $("analysisNotice").offsetTop - 20,
-    );
   }
 }
 async function resumeAnalysis(field, token) {
@@ -1237,7 +1432,161 @@ function renderChart() {
     }
   };
 }
+function initMovableTools() {
+  const panel = document.querySelector(".shape-tools");
+  const grip = $("moveTools");
+  const workspace = document.querySelector(".workspace");
+  const storageKey = "agropulse.tools-position.v1";
+  let drag = null;
+  const position = () => {
+    const rect = panel.getBoundingClientRect(), bounds = workspace.getBoundingClientRect();
+    return {x: rect.left - bounds.left, y: rect.top - bounds.top};
+  };
+  const place = (x,y) => {
+    const bounds = workspace.getBoundingClientRect();
+    const rect = panel.getBoundingClientRect();
+    panel.style.left = `${Math.max(8, Math.min(x, bounds.width - rect.width - 8))}px`;
+    panel.style.top = `${Math.max(8, Math.min(y, bounds.height - rect.height - 8))}px`;
+  };
+  const save = () => { try { localStorage.setItem(storageKey, JSON.stringify(position())); } catch {} };
+  const reset = () => {
+    panel.style.left = ""; panel.style.top = "";
+    try { localStorage.removeItem(storageKey); } catch {}
+  };
+  $("resetTools").onclick = () => { reset(); toast("Панель инструментов возвращена на исходное место"); };
+  try {
+    const saved = JSON.parse(localStorage.getItem(storageKey));
+    if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) place(saved.x, saved.y);
+  } catch {}
+  grip.addEventListener("pointerdown", event => {
+    if (event.button !== 0 || drag) return;
+    event.preventDefault();
+    grip.focus({preventScroll:true});
+    drag = {id:event.pointerId, clientX:event.clientX, clientY:event.clientY, ...position()};
+    grip.setPointerCapture(event.pointerId);
+    panel.classList.add("is-moving");
+  });
+  grip.addEventListener("pointermove", event => {
+    if (!drag || event.pointerId !== drag.id) return;
+    place(drag.x + event.clientX - drag.clientX, drag.y + event.clientY - drag.clientY);
+  });
+  const finish = (event, cancelled = false) => {
+    if (!drag || event.pointerId !== drag.id) return;
+    if (cancelled) place(drag.x, drag.y);
+    const id = drag.id;
+    drag = null;
+    panel.classList.remove("is-moving");
+    if (grip.hasPointerCapture(id)) grip.releasePointerCapture(id);
+    save();
+  };
+  grip.addEventListener("pointerup", event => finish(event));
+  grip.addEventListener("pointercancel", event => finish(event, true));
+  grip.addEventListener("lostpointercapture", event => finish(event, true));
+  grip.addEventListener("dblclick", reset);
+  grip.addEventListener("keydown", event => {
+    if (event.key === "Home") { event.preventDefault(); reset(); return; }
+    const directions = {ArrowLeft:[-1,0], ArrowRight:[1,0], ArrowUp:[0,-1], ArrowDown:[0,1]};
+    if (!directions[event.key]) return;
+    event.preventDefault();
+    const [dx,dy] = directions[event.key], step = event.shiftKey ? 40 : 10, p = position();
+    place(p.x + dx*step, p.y + dy*step); save();
+  });
+  window.addEventListener("resize", () => {
+    const p = position(); place(p.x,p.y);
+  });
+}
+function initSettings() {
+  try { state.showOsmFields = localStorage.getItem("agropulse.show-osm") !== "false"; }
+  catch { state.showOsmFields = true; }
+  const checkbox = $("showOsmFields");
+  checkbox.checked = state.showOsmFields;
+  checkbox.onchange = () => {
+    state.showOsmFields = checkbox.checked;
+    try { localStorage.setItem("agropulse.show-osm", String(checkbox.checked)); } catch {}
+    if (!checkbox.checked && state.current && state.fields.some(p => p.id === state.current.id)) {
+      clearAnalysis(); closeDetail();
+    }
+    renderMap();
+  };
+  const setOpen = (open, returnFocus = false) => {
+    if (open) $("settingsPanel").showModal();
+    else $("settingsPanel").close();
+    $("settingsButton").setAttribute("aria-expanded", String(open));
+    if (open) $("closeSettings").focus({preventScroll:true});
+    else if (returnFocus) $("settingsButton").focus({preventScroll:true});
+  };
+  $("settingsButton").onclick = () => setOpen(!$("settingsPanel").open);
+  $("closeSettings").onclick = () => setOpen(false, true);
+  $("settingsPanel").addEventListener("click", event => {
+    const rect = $("settingsPanel").getBoundingClientRect();
+    if (event.target === $("settingsPanel") && (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom)) setOpen(false, true);
+  });
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape" && $("settingsPanel").open) {
+      event.preventDefault(); event.stopImmediatePropagation(); setOpen(false, true);
+    }
+  }, true);
+  window.AgroI18n?.init();
+}
+function deleteSelectionOnKey(event) {
+  if (event.key !== "Delete" || event.repeat || event.isComposing || event.ctrlKey || event.altKey || event.metaKey) return;
+  const target = event.target;
+  if (target?.isContentEditable || target?.closest?.("input, textarea, select, [role='textbox'], [contenteditable]:not([contenteditable='false'])")) return;
+  if (state.savingDraft || state.deletingField) return;
+  if (state.drawing) {
+    event.preventDefault();
+    stopDrawing();
+    toast("Несохранённый контур удалён");
+  } else if (state.current?.source === "user_geometry") {
+    event.preventDefault();
+    deleteSelected();
+  } else if (state.current?.geometry) {
+    event.preventDefault();
+    const id = state.current.id;
+    clearAnalysis(); closeDetail();
+    state.fields = state.fields.filter(item => item.id !== id);
+    renderMap();
+    toast("Несохранённый контур убран с карты");
+  }
+}
+function setFieldTab(tab, focus = false) {
+  const charts = tab === "charts";
+  $("fieldInfoPane").hidden = charts;
+  $("fieldChartsPane").hidden = !charts;
+  [$("fieldInfoTab"), $("fieldChartsTab")].forEach((button, index) => {
+    const selected = charts === (index === 1);
+    button.setAttribute("aria-selected", String(selected));
+    button.tabIndex = selected ? 0 : -1;
+    if (selected && focus) button.focus();
+  });
+  if (charts && state.points.length) renderChart();
+}
+function initFieldDialog() {
+  const dialog = $("fieldDialog");
+  document.body.append(dialog);
+  // Keep the existing chart and analysis handlers; only change their container.
+  $("fieldChartsPane").append($("chartPanel"), $("fieldSummary"), $("anomalyList"), $("dataNotes"));
+  $("fieldInfoTab").onclick = () => setFieldTab("info");
+  $("fieldChartsTab").onclick = () => setFieldTab("charts");
+  $("goToFieldInfo").onclick = () => setFieldTab("info", true);
+  dialog.querySelector('[role="tablist"]').addEventListener("keydown", event => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const charts = event.key === "End" || (event.key !== "Home" && $("fieldChartsTab").getAttribute("aria-selected") !== "true");
+    setFieldTab(charts ? "charts" : "info", true);
+  });
+  dialog.addEventListener("cancel", event => { event.preventDefault(); closeDetail(); });
+  dialog.addEventListener("click", event => {
+    const rect = dialog.getBoundingClientRect();
+    if (event.target === dialog && (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom)) closeDetail();
+  });
+}
 async function boot() {
+  initFieldDialog();
+  try { state.maptilerKey = (await api("/api/map-config")).maptiler_key; } catch { state.maptilerKey = ""; }
+  $("closeToast").onclick = closeToast;
+  initSettings();
+  initMovableTools();
   setFieldsOpen(false);
   initMap();
   document.querySelectorAll("[data-tool]").forEach((button) => {
@@ -1292,8 +1641,13 @@ async function boot() {
   $("closeDetail").onclick = closeDetail;
   $("analyzeButton").onclick = analyze;
   $("discoverButton").onclick = discoverFields;
-  $("fitButton").onclick = fitFields;
   $("searchForm").onsubmit = searchRegion;
+  $("regionSearch").addEventListener("input", suggestSavedPlots);
+  $("regionSearch").addEventListener("keydown", event => {
+    if (event.key === "ArrowDown" && !$("searchResults").hidden) {
+      event.preventDefault(); $("searchResults").querySelector("button")?.focus();
+    }
+  });
   $("polygonSelect").onchange = () =>
     selectField(state.polygons.find((p) => p.id === $("polygonSelect").value));
   $("yearSelect").onchange = () => {
@@ -1339,14 +1693,21 @@ async function boot() {
     $("chartChevron").textContent = hidden ? "⌃" : "⌄";
   };
   document.addEventListener("keydown", (e) => {
+    if ($("settingsPanel").open) return;
+    if ($("fieldDialog").open && e.key === "Escape") {
+      e.preventDefault(); closeDetail(); return;
+    }
+    deleteSelectionOnKey(e);
     if (e.key === "Escape") {
+      searchVersion++;
+      if (state.activeTool === "lookup") setTool("select");
       setFieldsOpen(false);
       if (state.drawing) stopDrawing();
       $("searchResults").hidden = true;
     }
   });
   document.addEventListener("click", (e) => {
-    if (!$("searchForm").contains(e.target)) $("searchResults").hidden = true;
+    if (!$("searchForm").contains(e.target)) { searchVersion++; $("searchResults").hidden = true; }
   });
   const results = await Promise.allSettled([
     loadPolygons(),

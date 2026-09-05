@@ -4,6 +4,7 @@ __pycache__/
 .venv/
 .~lock.*#
 api/credentials.env
+maptiler.local.json
 api/save_page/
 artifacts/*.csv
 artifacts/models/
