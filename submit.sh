@@ -7,6 +7,8 @@ if [[ -n "${PYTHON_BIN:-}" ]]; then
   PYTHON_EXECUTABLE="$PYTHON_BIN"
 elif [[ -x "$PROJECT_DIR/.venv/bin/python" ]]; then
   PYTHON_EXECUTABLE="$PROJECT_DIR/.venv/bin/python"
+elif [[ -x "$PROJECT_DIR/.venv/Scripts/python.exe" ]]; then
+  PYTHON_EXECUTABLE="$PROJECT_DIR/.venv/Scripts/python.exe"
 else
   PYTHON_EXECUTABLE="python3"
 fi
