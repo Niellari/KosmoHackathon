@@ -77,6 +77,7 @@ function initMap() {
   $("map").replaceChildren();
   state.map = L.map("map", { zoomControl: false }).setView([46.85, 40.32], 12);
   initNavigationControls();
+  window.AgroWeather?.init(state.map, state.maptilerKey);
   L.control.scale({ position: "bottomleft", imperial: false }).addTo(state.map);
   let savedBasemap = "standard";
   try { savedBasemap = localStorage.getItem("agropulse.basemap") || "standard"; } catch {}

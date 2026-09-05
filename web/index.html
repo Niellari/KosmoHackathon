@@ -48,6 +48,20 @@
       </button>
     </header>
     <main class="workspace">
+      <button id="weatherToggle" class="weather-toggle" type="button" aria-pressed="false" aria-expanded="false" aria-controls="weatherPanel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 16a4 4 0 1 1 1-7 5 5 0 0 1 9 3 3 3 0 0 1 0 6H8M9 21l1-2m5 2 1-2"/></svg><span>Погода</span></button>
+      <section id="weatherPanel" class="weather-panel" aria-label="Погода на карте" hidden>
+        <header><strong>Погода на карте</strong><button id="weatherClose" type="button" aria-label="Закрыть погоду">×</button></header>
+        <div class="weather-modes" role="group" aria-label="Погодный слой"><button type="button" data-weather="temperature" aria-pressed="true">Температура</button><button type="button" data-weather="precipitation" aria-pressed="false">Осадки</button></div>
+        <label for="weatherTime">Время прогноза</label><select id="weatherTime" disabled></select>
+        <div id="weatherLegend" class="weather-legend"></div>
+        <p id="weatherValue" class="weather-value"></p>
+        <label class="weather-opacity" for="weatherOpacity"><span>Непрозрачность</span><input id="weatherOpacity" type="range" min="15" max="85" value="50" /></label>
+        <p id="weatherStatus" role="status" aria-live="polite"></p>
+        <button id="weatherRetry" type="button" hidden>Повторить загрузку</button>
+        <small>Прогноз GFS · сетка около 28 км. Не измерения на участке.</small>
+        <small>Облачность пока недоступна у подключённого источника.</small>
+        <a href="https://www.maptiler.com/weather/" target="_blank" rel="noopener">MapTiler Weather</a>
+      </section>
       <div id="map" aria-label="Карта полей">
         <div class="map-fallback">Загрузка карты…</div>
       </div>
@@ -328,6 +342,7 @@
     </div>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="/static/i18n.js"></script>
+    <script src="/static/weather.js"></script>
     <script src="/static/app.js"></script>
   </body>
 </html>
