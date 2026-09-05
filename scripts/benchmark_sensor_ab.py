@@ -47,6 +47,7 @@ def main() -> None:
     parser.add_argument("--versions", nargs="+", type=int, default=[3, 4])
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--transductive", action="store_true")
+    parser.add_argument("--scan-expert", action="store_true")
     args = parser.parse_args()
 
     config = load_config()
@@ -63,15 +64,31 @@ def main() -> None:
         model = SensorAwareLightGBMModel(
             f"sensor_v{version}", params, config.training
         ).fit(train, feature_builder)
-        prediction = model.predict(context, targets, feature_builder)[
-            "prediction"
-        ].to_numpy(float)
+        result = model.predict(context, targets, feature_builder)
+        prediction = result["prediction"].to_numpy(float)
         predictions[version] = prediction
         print(
             f"v{version}: rmse={rmse(truth, prediction):.6f} "
             f"seen={rmse(truth, prediction, ~unseen):.6f} "
             f"unseen={rmse(truth, prediction, unseen):.6f}"
         )
+        if args.scan_expert:
+            global_prediction = result["global_prediction"].to_numpy(float)
+            expert_prediction = result["expert_prediction"].to_numpy(float)
+            for label, selected in (
+                ("all", np.ones(len(truth), dtype=bool)),
+                ("seen", ~unseen),
+                ("unseen", unseen),
+            ):
+                candidates = []
+                for weight in np.linspace(0, 1, 101):
+                    mixed = (1 - weight) * global_prediction + weight * expert_prediction
+                    candidates.append((rmse(truth, mixed, selected), weight))
+                best_score, best_weight = min(candidates)
+                print(
+                    f"v{version} expert_{label}: weight={best_weight:.2f} "
+                    f"rmse={best_score:.6f}"
+                )
 
     if len(predictions) == 2:
         left, right = args.versions

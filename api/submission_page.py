@@ -274,7 +274,11 @@ class SubmissionPage:
         get_logger().info("Форма появилась; отправка доступна")
 
     def submit(self, timeout: int, post_click_delay: float):
-        from selenium.common.exceptions import TimeoutException, WebDriverException
+        from selenium.common.exceptions import (
+            ElementClickInterceptedException,
+            TimeoutException,
+            WebDriverException,
+        )
         from selenium.webdriver.common.by import By
         from selenium.webdriver.support import expected_conditions as conditions
         from selenium.webdriver.support.ui import WebDriverWait
@@ -293,7 +297,28 @@ class SubmissionPage:
         previous_url = self.driver.current_url
         previous_result = self._read_latest_result()
         try:
+            self.driver.execute_script(
+                "arguments[0].scrollIntoView({block: 'center', inline: 'center'});",
+                button,
+            )
             button.click()
+        except ElementClickInterceptedException:
+            # После восстановления постоянной Chrome-сессии браузер иногда
+            # сохраняет старую позицию прокрутки, и таблица перекрывает кнопку.
+            # Повторно находим элемент и выполняем DOM-click после центрирования.
+            get_logger().warning(
+                "Обычный клик по кнопке перехвачен; повторяем через DOM-click"
+            )
+            button = WebDriverWait(self.driver, timeout).until(
+                conditions.element_to_be_clickable(
+                    (By.CSS_SELECTOR, self.selectors.submit_button)
+                )
+            )
+            self.driver.execute_script(
+                "arguments[0].scrollIntoView({block: 'center', inline: 'center'});"
+                "arguments[0].click();",
+                button,
+            )
         except WebDriverException as error:
             # Chrome иногда сообщает об отсоединённом frame уже после того, как
             # POST был принят. В этом случае продолжаем и проверяем таблицу.

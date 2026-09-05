@@ -187,6 +187,26 @@ class SubmissionPageTests(unittest.TestCase):
         button.click.assert_called_once_with()
         sleep.assert_called_once_with(4.0)
 
+    def test_submit_falls_back_to_dom_click_when_click_is_intercepted(self):
+        from selenium.common.exceptions import ElementClickInterceptedException
+
+        driver = Mock()
+        driver.current_url = "https://example.test/solution"
+        driver.find_elements.return_value = []
+        button = Mock()
+        button.click.side_effect = ElementClickInterceptedException()
+        page = self.make_page(driver)
+
+        with patch(
+            "selenium.webdriver.support.ui.WebDriverWait.until",
+            return_value=button,
+        ), patch("api.submission_page.time.sleep"):
+            page.submit(timeout=30, post_click_delay=4.0)
+
+        button.click.assert_called_once_with()
+        self.assertEqual(driver.execute_script.call_count, 2)
+        self.assertIn("arguments[0].click()", driver.execute_script.call_args.args[0])
+
     def test_active_cooldown_is_awaited_before_submission(self):
         driver = Mock()
         alert = Mock()

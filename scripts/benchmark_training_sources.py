@@ -32,6 +32,7 @@ def main() -> None:
         default=("context", "combined"),
     )
     parser.add_argument("--seed", type=int, default=73)
+    parser.add_argument("--context-weight", type=float, default=1.0)
     args = parser.parse_args()
 
     config = load_config()
@@ -59,6 +60,10 @@ def main() -> None:
 
     for mode in args.modes:
         train = combine_training_sources(sources[mode], None)
+        if "_dataset" in train:
+            train.loc[
+                train["_dataset"].eq("current"), "_sample_weight"
+            ] = args.context_weight
         model = SensorAwareLightGBMModel(
             f"sensor_{mode}", params, config.training
         ).fit(train, builder)

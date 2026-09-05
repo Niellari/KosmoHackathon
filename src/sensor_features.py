@@ -228,10 +228,41 @@ def _pairwise_sensor_offsets(context: pd.DataFrame) -> np.ndarray:
     return offsets
 
 
+def _pairwise_sensor_affine(context: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+    """Устойчивая линейная калибровка между одновременно видимыми сенсорами."""
+
+    columns = [column for _, column, _ in SENSORS]
+    slopes = np.eye(len(columns), dtype=float)
+    intercepts = np.zeros((len(columns), len(columns)), dtype=float)
+    offsets = _pairwise_sensor_offsets(context)
+    for target, target_column in enumerate(columns):
+        for source, source_column in enumerate(columns):
+            if target == source:
+                continue
+            pairs = context[[source_column, target_column]].dropna()
+            if len(pairs) < 30 or pairs[source_column].std() < 1e-6:
+                slopes[target, source] = 1.0
+                intercepts[target, source] = offsets[target, source]
+                continue
+            slope = float(
+                np.polyfit(
+                    pairs[source_column].to_numpy(float),
+                    pairs[target_column].to_numpy(float),
+                    1,
+                )[0]
+            )
+            slope = float(np.clip(slope, 0.5, 1.5))
+            residual = pairs[target_column] - slope * pairs[source_column]
+            slopes[target, source] = slope
+            intercepts[target, source] = float(residual.median())
+    return slopes, intercepts
+
+
 def _harmonized_primary_features(
     context: pd.DataFrame,
     rows: pd.DataFrame,
     probabilities: pd.DataFrame,
+    feature_version: int = 4,
 ) -> pd.DataFrame:
     """Интерполирует плотный primary-ряд в шкале вероятного сенсора."""
 
@@ -312,6 +343,48 @@ def _harmonized_primary_features(
         / np.where(total_weight > 0, total_weight, 1.0),
         np.nan,
     )
+    if feature_version >= 10:
+        slopes, intercepts = _pairwise_sensor_affine(context)
+        affine_interpolations = []
+        for target, (name, _, _) in enumerate(SENSORS):
+            adjusted_previous = previous.copy()
+            adjusted_following = following.copy()
+            has_previous = previous_source >= 0
+            has_next = next_source >= 0
+            adjusted_previous[has_previous] = (
+                intercepts[target, previous_source[has_previous]]
+                + slopes[target, previous_source[has_previous]] * previous[has_previous]
+            )
+            adjusted_following[has_next] = (
+                intercepts[target, next_source[has_next]]
+                + slopes[target, next_source[has_next]] * following[has_next]
+            )
+            total = previous_days + next_days
+            usable = np.isfinite(total) & (total > 0)
+            fraction = np.divide(
+                previous_days, total, out=np.zeros_like(total), where=usable
+            )
+            linear = adjusted_previous + (
+                adjusted_following - adjusted_previous
+            ) * fraction
+            fallback = np.where(
+                np.isfinite(adjusted_previous), adjusted_previous, adjusted_following
+            )
+            interpolation = np.where(
+                usable & np.isfinite(linear), linear, fallback
+            )
+            result[f"affine_{name}_interpolation"] = interpolation
+            affine_interpolations.append(interpolation)
+        affine_values = np.stack(affine_interpolations, axis=1)
+        available = np.isfinite(affine_values)
+        effective_weights = np.where(available, weights, 0.0)
+        total_weight = effective_weights.sum(axis=1)
+        result["affine_source_interpolation"] = np.where(
+            total_weight > 0,
+            (np.where(available, affine_values, 0.0) * effective_weights).sum(axis=1)
+            / np.where(total_weight > 0, total_weight, 1.0),
+            np.nan,
+        )
     return pd.DataFrame(result, index=rows.index)
 
 
@@ -509,7 +582,12 @@ def sensor_series_features(
     frame["best_source_interpolation"] = values[np.arange(len(values)), best]
     if feature_version >= 4:
         frame = pd.concat(
-            [frame, _harmonized_primary_features(context, rows, probabilities)],
+            [
+                frame,
+                _harmonized_primary_features(
+                    context, rows, probabilities, feature_version
+                ),
+            ],
             axis=1,
         )
     if feature_version >= 5:

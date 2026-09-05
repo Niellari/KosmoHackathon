@@ -10,4 +10,7 @@ artifacts/models/
 artifacts/submissions/
 artifacts/collection/
 artifacts/benchmarks/
+artifacts/web-polygons.json
+artifacts/web-polygons.tmp
+artifacts/monitoring/
 !artifacts/.gitkeep

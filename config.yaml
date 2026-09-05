@@ -137,7 +137,7 @@ models:
       artifact_path: artifacts/models/sensor_lightgbm.joblib
       load_if_exists: true
       params:
-        feature_version: 8
+        feature_version: 9
         n_masks: 10
         mask_rate: 0.15
         mask_seed: 1000

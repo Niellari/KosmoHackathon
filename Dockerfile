@@ -6,10 +6,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements-collect.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-collect.txt
 
 COPY main.py ./
 COPY config.yaml ./
+COPY configs ./configs
 COPY src ./src
 COPY web ./web
 COPY data ./data

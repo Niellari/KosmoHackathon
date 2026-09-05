@@ -7,7 +7,11 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from src.sensor_features import sensor_series_features, source_labels
+from src.sensor_features import (
+    _pairwise_sensor_affine,
+    sensor_series_features,
+    source_labels,
+)
 from src.models.sensor import SensorAwareLightGBMModel
 
 
@@ -150,6 +154,21 @@ class SensorFeatureTests(unittest.TestCase):
 
         self.assertEqual(features.loc[7].tolist(), [0.0, 1.0])
         self.assertEqual(features.loc[8].tolist(), [0.0, 0.0])
+
+    def test_affine_sensor_calibration_recovers_linear_mapping(self):
+        source = np.linspace(0.1, 0.9, 40)
+        frame = pd.DataFrame(
+            {
+                "s2_ndvi": source,
+                "landsat_ndvi": 0.05 + 0.8 * source,
+                "modis_ndvi": np.nan,
+            }
+        )
+
+        slopes, intercepts = _pairwise_sensor_affine(frame)
+
+        self.assertAlmostEqual(slopes[1, 0], 0.8)
+        self.assertAlmostEqual(intercepts[1, 0], 0.05)
 
 
 if __name__ == "__main__":
