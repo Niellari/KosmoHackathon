@@ -171,6 +171,41 @@ def build_parser() -> argparse.ArgumentParser:
     )
     prepare_external.add_argument("--output", help="Путь к итоговому CSV")
 
+    collect_multisensor = subparsers.add_parser(
+        "collect-multisensor",
+        help="Собрать Sentinel-2, Landsat, MODIS и ERA5 в конкурсной схеме",
+    )
+    collect_multisensor.add_argument("--config", default="config.yaml")
+    collect_multisensor.add_argument(
+        "--regions", default="examples/regions.geojson", help="GeoJSON контуров"
+    )
+    collect_multisensor.add_argument("--start", required=True)
+    collect_multisensor.add_argument("--end", required=True)
+    collect_multisensor.add_argument(
+        "--output", default="artifacts/collection/multisensor.csv"
+    )
+
+    benchmark = subparsers.add_parser(
+        "benchmark",
+        help="Честная оценка на синтетических пропусках по спецификации платформы",
+    )
+    benchmark.add_argument("--config", default="config.yaml")
+    benchmark.add_argument("--train")
+    benchmark.add_argument("--model", help="Имя модели из models.available")
+    benchmark.add_argument("--repeats", type=int)
+    benchmark.add_argument("--mask-rate", type=float)
+    benchmark.add_argument("--holdout-fraction", type=float)
+    benchmark.add_argument("--seed", type=int)
+    benchmark.add_argument(
+        "--profile",
+        action="store_true",
+        help="Сравнить профиль синтетики с реальными пропусками теста",
+    )
+    benchmark.add_argument(
+        "--test",
+        help="Тестовый датасет для эталонного профиля (по умолчанию data.test_path)",
+    )
+
     return parser
 
 
@@ -227,6 +262,25 @@ def main() -> None:
         config = with_external_source_weights(
             config, _parse_external_source_weights(source_weight_values)
         )
+
+    if args.command == "collect-multisensor":
+        from src.providers import GeeProvider, ProviderSettings
+
+        provider = GeeProvider(
+            ProviderSettings(
+                key_path=config.collect.key_path,
+                project=config.collect.project,
+            )
+        )
+        frame = provider.fetch_many(args.regions, args.start, args.end)
+        output_path = Path(args.output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        frame.to_csv(output_path, index=False)
+        print(
+            f"Multi-sensor dataset создан: {output_path} | "
+            f"полигонов: {frame['anon_polygon_id'].nunique()} | строк: {len(frame)}"
+        )
+        return
 
     if args.command == "predict":
         if (
@@ -301,6 +355,43 @@ def main() -> None:
             f"с external={result['external_rmse_mean']:.6f}, "
             f"изменение={result['change_percent']:+.3f}%"
         )
+        return
+
+    if args.command == "benchmark":
+        from src.benchmark import run_benchmark
+        from src.data import load_dataset
+        from src.synthetic import compare_profiles, gap_profile
+
+        train_path = Path(args.train) if args.train else config.data.train_path
+        frame = load_dataset(train_path)
+
+        if args.profile:
+            test_path = Path(args.test) if args.test else config.data.test_path
+            reference = gap_profile(load_dataset(test_path))
+            spec_rate = args.mask_rate or config.benchmark.mask_rate
+            from src.synthetic import MaskSpec, apply_mask, generate_mask
+
+            mask = generate_mask(frame, MaskSpec(rate=spec_rate, seed=config.benchmark.seed))
+            generated = gap_profile(
+                apply_mask(frame, mask).assign(is_synthetic_gap=mask.to_numpy())
+            )
+            print(compare_profiles(reference, generated).to_string())
+            return
+
+        result = run_benchmark(
+            frame,
+            config,
+            model_name=config.models.selected,
+            repeats=args.repeats or config.benchmark.repeats,
+            mask_rate=args.mask_rate or config.benchmark.mask_rate,
+            seed=args.seed or config.benchmark.seed,
+            holdout_fraction=(
+                config.benchmark.holdout_fraction
+                if args.holdout_fraction is None
+                else args.holdout_fraction
+            ),
+        )
+        print(result.render())
         return
 
     if args.command == "serve":

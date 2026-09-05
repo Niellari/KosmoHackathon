@@ -1,0 +1,42 @@
+{
+  "type": "FeatureCollection",
+  "name": "Примеры контуров для сбора внешних данных",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "AOI-EXT-ROSTOV-1",
+        "crop_type": "озимая пшеница",
+        "comment": "Сальско-Манычская степь, ячейка ERA5 47.15N 42.15E"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[42.140, 47.140], [42.160, 47.140], [42.160, 47.160], [42.140, 47.160], [42.140, 47.140]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "AOI-EXT-ROSTOV-2",
+        "crop_type": "подсолнечник",
+        "comment": "Запад того же пояса, ячейка ERA5 46.85N 40.05E"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[40.040, 46.840], [40.060, 46.840], [40.060, 46.860], [40.040, 46.860], [40.040, 46.840]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "AOI-EXT-VORONEZH-1",
+        "crop_type": "зерновые",
+        "comment": "Кантемировка, ячейка ERA5 49.75N 39.75E"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[39.740, 49.740], [39.760, 49.740], [39.760, 49.760], [39.740, 49.760], [39.740, 49.740]]]
+      }
+    }
+  ]
+}

@@ -12,6 +12,7 @@ from src.models.boosting import (
 )
 from src.models.heuristic import BaselineModel, HeuristicEnsembleModel
 from src.models.sensor import SensorAwareLightGBMModel
+from src.models.sensor_combined import CombinedSensorModel
 
 
 MODEL_REGISTRY: dict[str, type[GapModel]] = {
@@ -20,6 +21,7 @@ MODEL_REGISTRY: dict[str, type[GapModel]] = {
     "lightgbm": LightGBMModel,
     "history_routed_lightgbm": HistoryRoutedLightGBMModel,
     "sensor_lightgbm": SensorAwareLightGBMModel,
+    "lightgbm_sensor": CombinedSensorModel,
     "catboost": CatBoostModel,
     "random_forest": RandomForestModel,
 }

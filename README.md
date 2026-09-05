@@ -102,6 +102,21 @@ python main.py validate --train data/train_dataset.csv --sample-size 3000 --seed
 
 Этот режим предназначен для быстрой проверки pipeline. Для итогового исследовательского отчёта необходимо дополнительно проводить разбиение по полигонам и целым сезонам.
 
+Для строгого сравнения используется benchmark, который одновременно скрывает
+наблюдения, исключает часть полигонов из обучения и отдельно показывает RMSE
+на видимых и новых полях:
+
+```bash
+python main.py benchmark --model sensor_lightgbm
+python main.py benchmark --model lightgbm_sensor
+python main.py benchmark --profile
+```
+
+`lightgbm_sensor` — отдельный экспериментальный вариант из ветки `combined`:
+он добавляет агрегаты остальных полигонов на ту же дату (`peer_date`) и может
+использовать LightGBM, ExtraTrees либо CatBoost. Основной
+`sensor_lightgbm` при этом сохранён без замены.
+
 ## Отправка submission через браузер
 
 Selenium-отправщик изолирован в каталоге `api/` и не входит в основной
@@ -476,9 +491,23 @@ python main.py collect \
 
 Сборщик проверяет GeoJSON, уникальность идентификаторов, попадание геометрии в
 настроенный bbox, площадь полей, минимальную долю cropland и число пригодных
-Sentinel-2 наблюдений. Для спутниковых рядов пока реализован Sentinel-2; ERA5
-используется для выбора зон, а Landsat и MODIS остаются следующими независимыми
-этапами расширения данных.
+Sentinel-2 наблюдений. Основной возобновляемый pipeline сохраняет сырые сцены
+Sentinel-2, а отдельный multi-sensor режим сразу формирует ежедневную таблицу с
+Sentinel-2, Landsat 8/9, MODIS и ERA5-Land:
+
+```bash
+EE_PROJECT_ID=your-project-id python main.py collect-multisensor \
+  --regions data/external/polygons.geojson \
+  --start 2019-04-01 \
+  --end 2024-10-30 \
+  --output artifacts/collection/multisensor.csv
+```
+
+По умолчанию команда использует авторизацию `earthengine authenticate`. Для
+сервера можно задать `collect.key_path` и `collect.project` в `config.yaml`.
+Каждый объект GeoJSON должен иметь `id`, `name` или `anon_polygon_id`; значение
+`crop_type` переносится из properties, а при его отсутствии записывается
+`неизвестно`.
 
 Преобразовать scene-level наблюдения в ежедневную таблицу схемы train:
 

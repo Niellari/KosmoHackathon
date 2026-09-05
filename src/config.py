@@ -169,6 +169,7 @@ class ModelDefinition(StrictModel):
         "lightgbm",
         "history_routed_lightgbm",
         "sensor_lightgbm",
+        "lightgbm_sensor",
         "catboost",
         "random_forest",
     ]
@@ -181,6 +182,11 @@ class ModelsConfig(StrictModel):
     selected: str = "lightgbm"
     on_unavailable: Literal["error", "fallback"] = "error"
     fallback_to: str | None = None
+    # Обучать ли модель ещё и на наблюдённых точках тестового файла. Это
+    # выданные признаки, а не скрытые ответы: контрольные строки в контексте
+    # уже равны NaN, поэтому утечки нет. Снимает сдвиг между полигонами train
+    # и полигонами теста, которых в train нет вовсе.
+    transductive: bool = False
     available: dict[str, ModelDefinition]
 
     @model_validator(mode="after")
@@ -198,6 +204,12 @@ class ModelsConfig(StrictModel):
 class PredictConfig(StrictModel):
     output_path: Path = Path("artifacts/submission.csv")
     prediction_column: str = "primary_ndvi_true"
+    # Ограничение предсказаний физически осмысленным диапазоном NDVI. Защищает
+    # от редкой экстраполяции модели: одна точка, улетевшая в -0.16, стоит
+    # примерно 0.0002 итогового RMSE на 2323 контрольных значениях.
+    # null отключает ограничение.
+    clip_min: float | None = 0.0
+    clip_max: float | None = 1.0
 
 
 class ExternalABValidationConfig(StrictModel):
@@ -218,6 +230,22 @@ class ValidationConfig(StrictModel):
     external_ab: ExternalABValidationConfig = ExternalABValidationConfig()
 
 
+class BenchmarkConfig(StrictModel):
+    """Оценка на синтетических пропусках, повторяющих процесс платформы."""
+
+    repeats: int = Field(default=3, ge=1, le=50)
+    mask_rate: float = Field(default=0.15, gt=0.0, lt=1.0)
+    seed: int = 42
+    holdout_fraction: float = Field(default=0.5, ge=0.0, lt=1.0)
+
+
+class CollectConfig(StrictModel):
+    """Сбор внешних данных через Earth Engine."""
+
+    key_path: Path | None = None
+    project: str | None = None
+
+
 class ServerConfig(StrictModel):
     host: str = "127.0.0.1"
     port: int = Field(default=8000, ge=1, le=65535)
@@ -233,6 +261,8 @@ class AppConfig(StrictModel):
     models: ModelsConfig
     predict: PredictConfig = PredictConfig()
     validation: ValidationConfig = ValidationConfig()
+    benchmark: BenchmarkConfig = BenchmarkConfig()
+    collect: CollectConfig = CollectConfig()
     server: ServerConfig = ServerConfig()
 
     @model_validator(mode="after")
@@ -298,8 +328,20 @@ def load_config(path: Path | str = "config.yaml") -> AppConfig:
     predict = config.predict.model_copy(
         update={"output_path": _resolve_path(base, config.predict.output_path)}
     )
+    collect = config.collect.model_copy(
+        update={
+            "key_path": _resolve_path(base, config.collect.key_path)
+            if config.collect.key_path is not None
+            else None
+        }
+    )
     return config.model_copy(
-        update={"data": data, "models": models, "predict": predict}
+        update={
+            "data": data,
+            "models": models,
+            "predict": predict,
+            "collect": collect,
+        }
     )
 
 

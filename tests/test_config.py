@@ -17,6 +17,7 @@ from src.external_validation import (
 )
 from src.models import create_model
 from src.models.boosting import HistoryRoutedLightGBMModel
+from src.models.sensor_combined import CombinedSensorModel
 
 
 class ConfigTests(unittest.TestCase):
@@ -29,10 +30,16 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(config.training.use_context_labels)
         self.assertEqual(config.training.gap_masking.strategy, "leave_one_out")
         self.assertEqual(config.training.gap_masking.replicas, 5)
-        self.assertTrue(config.features.temporal_dynamics.enabled)
+        self.assertFalse(config.features.temporal_dynamics.enabled)
         self.assertIn("catboost", config.models.available)
         self.assertIn("routed_lightgbm", config.models.available)
+        self.assertIn("lightgbm_sensor", config.models.available)
+        self.assertIn("sensor_extra_trees", config.models.available)
+        self.assertIn("sensor_catboost", config.models.available)
+        self.assertTrue(config.models.transductive)
         self.assertEqual(config.predict.prediction_column, "primary_ndvi_true")
+        self.assertEqual(config.predict.clip_min, 0.0)
+        self.assertEqual(config.predict.clip_max, 1.0)
         self.assertFalse(config.data.external.enabled)
         self.assertEqual(len(config.data.external.sources), 2)
         self.assertTrue(config.data.external.sources[0].path.is_absolute())
@@ -77,8 +84,27 @@ class ConfigTests(unittest.TestCase):
         self.assertIsInstance(model, HistoryRoutedLightGBMModel)
         self.assertEqual(model.min_reference_years, 1)
 
+    def test_registry_keeps_combined_sensor_as_separate_model(self):
+        config = select_model(load_config("config.yaml"), "lightgbm_sensor")
+        definition = config.models.available["lightgbm_sensor"]
+
+        model = create_model("lightgbm_sensor", definition, config.training)
+
+        self.assertIsInstance(model, CombinedSensorModel)
+        self.assertTrue(model.peer_date)
+
     def test_default_feature_schema_is_stable(self):
-        builder = FeatureBuilder(load_config("config.yaml").features)
+        # Блок temporal_dynamics включается явно: в боевом конфиге он выключен
+        # по замеру на платформе, но схема признаков должна оставаться стабильной.
+        features = load_config("config.yaml").features
+        features = features.model_copy(
+            update={
+                "temporal_dynamics": features.temporal_dynamics.model_copy(
+                    update={"enabled": True}
+                )
+            }
+        )
+        builder = FeatureBuilder(features)
 
         self.assertEqual(len(builder.feature_names), 36)
         self.assertIn("linear", builder.feature_names)
@@ -156,7 +182,7 @@ class ConfigTests(unittest.TestCase):
             for column in builder.feature_names
             if HistoryRoutedLightGBMModel._is_history_feature(column)
         ]
-        self.assertEqual(len(builder.feature_names), 59)
+        self.assertEqual(len(builder.feature_names), 44)
         self.assertTrue(
             np.allclose(
                 train_matrix.loc[20, history_columns],

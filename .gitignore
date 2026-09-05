@@ -15,3 +15,4 @@ artifacts/web-polygons.json
 artifacts/web-polygons.tmp
 artifacts/monitoring/
 !artifacts/.gitkeep
+catboost_info/

@@ -72,7 +72,11 @@ class AnalysisPipeline:
         return requested
 
     def _create_predictor(
-        self, model_name: str, training_source: pd.DataFrame, cache: bool
+        self,
+        model_name: str,
+        training_source: pd.DataFrame,
+        cache: bool,
+        transductive: bool = False,
     ) -> PredictorService:
         if model_name not in self.config.models.available:
             choices = ", ".join(sorted(self.config.models.available))
@@ -80,6 +84,9 @@ class AnalysisPipeline:
         if cache and model_name in self._predictors:
             return self._predictors[model_name]
         models_config = self.config.models.model_copy(update={"selected": model_name})
+        if transductive:
+            # Отдельный артефакт: обучающая выборка шире, путать их кэшем нельзя.
+            models_config = _retarget_artifact(models_config, model_name)
         predictor = PredictorService(
             models_config, self.config.features, self.config.training
         )
@@ -92,16 +99,30 @@ class AnalysisPipeline:
         """Загружает или обучает выбранную модель один раз при старте приложения."""
 
         selected = self._model_name(model_name)
-        primary = self.reference if self.reference is not None else self.data
         context = combine_context(self.data, self.reference)
-        training_source = self._training_source(primary, context)
+        transductive = (
+            self.config.models.transductive
+            or self.config.training.use_context_labels
+        )
+        primary = (
+            context
+            if transductive
+            else self.reference if self.reference is not None else self.data
+        )
+        training_source = self._training_source(primary)
         predictor = self._create_predictor(
-            selected, training_source, cache=self.reference is not None
+            selected,
+            training_source,
+            cache=self.reference is not None and not transductive,
+            transductive=transductive,
         )
         return predictor.selected_name
 
     def predict_targets(
-        self, target_mask: pd.Series, method: str | None = None
+        self,
+        target_mask: pd.Series,
+        method: str | None = None,
+        transductive: bool | None = None,
     ) -> pd.DataFrame:
         if len(target_mask) != len(self.data):
             raise ValueError("Размер target_mask не совпадает с датасетом")
@@ -112,13 +133,25 @@ class AnalysisPipeline:
         current = self.data.copy()
         current.loc[target_mask, "primary_ndvi"] = np.nan
         context = combine_context(current, self.reference)
-        primary = self.reference if self.reference is not None else current
-        training_source = self._training_source(primary, context)
+        if transductive is None:
+            transductive = (
+                self.config.models.transductive
+                or self.config.training.use_context_labels
+            )
+        if transductive:
+            # В context целевые строки уже скрыты, поэтому обучение на нём
+            # использует только выданные наблюдения тестового файла, а не
+            # ответы. Внешние источники добавляются как обычно.
+            primary = context
+        else:
+            primary = self.reference if self.reference is not None else current
+        training_source = self._training_source(primary)
         model_name = self._model_name(method)
         predictor = self._create_predictor(
             model_name,
             training_source,
-            cache=self.reference is not None,
+            cache=self.reference is not None and not transductive,
+            transductive=transductive,
         )
         return predictor.predict(context, targets)
 
@@ -133,30 +166,25 @@ class AnalysisPipeline:
         if polygon.empty:
             raise KeyError(f"Для полигона {polygon_id} нет данных за {year} год")
 
-        # В новой версии test нет климатологии: берём только известные наблюдения
-        # этого поля за другие годы, не используя восстановленные значения.
-        history = combine_context(self.data, self.reference)
-        history = history[(history['anon_polygon_id'] == polygon_id) & (history['year'] != year)]
-        history = history[history['primary_ndvi'].notna()]
-        for column in ('ndvi_climatology_mean', 'ndvi_climatology_std'):
-            if column not in polygon:
-                polygon[column] = np.nan
-        for index, row in polygon.iterrows():
-            candidates = history.loc[(history['doy'] - row['doy']).abs() <= 21, 'primary_ndvi']
-            if len(candidates) >= 3:
-                if pd.isna(row['ndvi_climatology_mean']):
-                    polygon.at[index, 'ndvi_climatology_mean'] = float(candidates.median())
-                if pd.isna(row['ndvi_climatology_std']):
-                    polygon.at[index, 'ndvi_climatology_std'] = max(float(candidates.std(ddof=0)), .03)
+        # Норма считается по всем сезонам полигона, а не по одному запрошенному:
+        # иначе «другие годы» внутри detect_anomalies пусты, и наблюдённые точки
+        # остаются без Z-score. Раньше это маскировали колонки климатологии из
+        # CSV, но в обновлённом тестовом наборе их нет вовсе.
+        history = polygon_all.copy()
+        history["primary_ndvi_filled"] = history["primary_ndvi"]
 
-        polygon["primary_ndvi_filled"] = polygon["primary_ndvi"]
         missing = polygon["primary_ndvi"].isna()
         if missing.any():
             target_mask = self.data.index.isin(polygon.loc[missing].index)
-            predictions = self.predict_targets(pd.Series(target_mask), method=None)
-            polygon.loc[missing, "primary_ndvi_filled"] = predictions["prediction"]
-            # Климатология рассчитана отдельно по фактической истории поля.
-        return detect_anomalies(polygon.reset_index(drop=True))
+            predictions = self.predict_targets(
+                pd.Series(target_mask), method=None, transductive=False
+            )
+            history.loc[missing[missing].index, "primary_ndvi_filled"] = predictions[
+                "prediction"
+            ]
+
+        analysed = detect_anomalies(history.reset_index(drop=True))
+        return analysed[analysed["year"] == year].reset_index(drop=True)
 
     def validate(
         self, sample_size: int = 3000, seed: int = 42, model_name: str | None = None
@@ -177,3 +205,17 @@ class AnalysisPipeline:
             "model": selected_name,
             "model_rmse": float(np.sqrt(np.mean(np.square(truth - selected.to_numpy())))),
         }
+
+
+def _retarget_artifact(models_config, model_name: str):
+    """Отдельный путь артефакта для трансдуктивного режима."""
+
+    definition = models_config.available[model_name]
+    if definition.artifact_path is None:
+        return models_config
+    updated = definition.model_copy(
+        update={"artifact_path": definition.artifact_path.with_suffix(".transductive.joblib")}
+    )
+    return models_config.model_copy(
+        update={"available": {**models_config.available, model_name: updated}}
+    )
