@@ -64,6 +64,24 @@ class DataTests(unittest.TestCase):
         ]
         self.assertTrue((weight == 0.25).all())
 
+    def test_context_labels_can_be_used_for_transductive_training(self):
+        current = sample_frame()
+        current["anon_polygon_id"] = "AOI-NEW"
+        reference = sample_frame()
+        config = load_config("config.yaml")
+        pipeline = AnalysisPipeline(current, reference=reference, config=config)
+        context = combine_context(pipeline.data, pipeline.reference)
+
+        training = pipeline._training_source(reference, context)
+
+        self.assertIn("AOI-NEW", set(training["anon_polygon_id"]))
+        self.assertEqual(
+            training.loc[
+                training["anon_polygon_id"] == "AOI-NEW", "primary_ndvi"
+            ].notna().sum(),
+            current["primary_ndvi"].notna().sum(),
+        )
+
 
 class InterpolationTests(unittest.TestCase):
     def test_pchip_preserves_monotonic_local_shape(self):

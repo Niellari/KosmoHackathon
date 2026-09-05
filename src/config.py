@@ -158,6 +158,7 @@ class GapMaskingConfig(StrictModel):
 class TrainingConfig(StrictModel):
     target_mode: Literal["direct", "residual"] = "direct"
     residual_baseline: Literal["neighbor_mean", "linear"] = "linear"
+    use_context_labels: bool = False
     gap_masking: GapMaskingConfig = GapMaskingConfig()
 
 
@@ -167,6 +168,7 @@ class ModelDefinition(StrictModel):
         "heuristic_ensemble",
         "lightgbm",
         "history_routed_lightgbm",
+        "sensor_lightgbm",
         "catboost",
         "random_forest",
     ]

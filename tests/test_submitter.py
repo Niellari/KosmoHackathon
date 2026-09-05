@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 from io import StringIO
 import json
+import os
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
@@ -119,7 +120,8 @@ class CookieStoreTests(unittest.TestCase):
             destination = FakeDriver()
             self.assertEqual(store.restore(destination), 1)
             self.assertEqual(destination.cookies[0]["value"], "secret")
-            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            if os.name == "posix":
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
     def test_broken_cookie_file_is_ignored(self):
         with tempfile.TemporaryDirectory() as directory:

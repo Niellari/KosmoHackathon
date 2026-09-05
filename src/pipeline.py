@@ -54,8 +54,17 @@ class AnalysisPipeline:
             config=active_config,
         )
 
-    def _training_source(self, primary: pd.DataFrame) -> pd.DataFrame:
-        return combine_training_sources(primary, self.training_extra)
+    def _training_source(
+        self,
+        primary: pd.DataFrame,
+        context: pd.DataFrame | None = None,
+    ) -> pd.DataFrame:
+        competition = (
+            context
+            if self.config.training.use_context_labels and context is not None
+            else primary
+        )
+        return combine_training_sources(competition, self.training_extra)
 
     def _model_name(self, requested: str | None) -> str:
         if requested in (None, "ml"):
@@ -84,7 +93,8 @@ class AnalysisPipeline:
 
         selected = self._model_name(model_name)
         primary = self.reference if self.reference is not None else self.data
-        training_source = self._training_source(primary)
+        context = combine_context(self.data, self.reference)
+        training_source = self._training_source(primary, context)
         predictor = self._create_predictor(
             selected, training_source, cache=self.reference is not None
         )
@@ -103,7 +113,7 @@ class AnalysisPipeline:
         current.loc[target_mask, "primary_ndvi"] = np.nan
         context = combine_context(current, self.reference)
         primary = self.reference if self.reference is not None else current
-        training_source = self._training_source(primary)
+        training_source = self._training_source(primary, context)
         model_name = self._model_name(method)
         predictor = self._create_predictor(
             model_name,

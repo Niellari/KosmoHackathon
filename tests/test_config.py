@@ -23,9 +23,10 @@ class ConfigTests(unittest.TestCase):
     def test_default_config_is_valid(self):
         config = load_config("config.yaml")
 
-        self.assertEqual(config.models.selected, "routed_lightgbm")
+        self.assertEqual(config.models.selected, "sensor_lightgbm")
         self.assertEqual(config.training.target_mode, "direct")
         self.assertEqual(config.training.residual_baseline, "linear")
+        self.assertTrue(config.training.use_context_labels)
         self.assertEqual(config.training.gap_masking.strategy, "leave_one_out")
         self.assertEqual(config.training.gap_masking.replicas, 5)
         self.assertTrue(config.features.temporal_dynamics.enabled)
@@ -41,7 +42,7 @@ class ConfigTests(unittest.TestCase):
         config = load_config("config.yaml")
         changed = select_model(config, "baseline")
 
-        self.assertEqual(config.models.selected, "routed_lightgbm")
+        self.assertEqual(config.models.selected, "sensor_lightgbm")
         self.assertEqual(changed.models.selected, "baseline")
 
     def test_unknown_config_fields_are_rejected(self):

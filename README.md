@@ -9,6 +9,7 @@
 - строгая проверка схемы, количества строк, ключей, `NaN` и бесконечных значений;
 - baseline из двух ближайших наблюдений;
 - LightGBM-метамодель над соседними наблюдениями, историей полигона и сезонной кривой культуры;
+- sensor-aware LightGBM с орбитальным классификатором и отдельными рядами Sentinel-2, Landsat и MODIS;
 - восстановление календарных признаков из `date`;
 - детекция аномалий по отклонению от сезонной нормы;
 - объяснения с использованием Z-score, температуры и осадков;
@@ -219,10 +220,10 @@ python main.py serve \
 
 ```yaml
 models:
-  selected: routed_lightgbm
+  selected: sensor_lightgbm
 ```
 
-Доступны `baseline`, `ensemble`, `lightgbm`, `routed_lightgbm`,
+Доступны `baseline`, `ensemble`, `lightgbm`, `routed_lightgbm`, `sensor_lightgbm`,
 `random_forest` и `catboost`.
 Выбор можно временно переопределить без редактирования файла:
 
@@ -266,6 +267,7 @@ models:
 training:
   target_mode: direct       # direct | residual
   residual_baseline: linear
+  use_context_labels: true  # учить маски также на известных строках test
   gap_masking:
     strategy: leave_one_out  # leave_one_out | test_like_blocks
     target_fraction: 0.15
@@ -280,6 +282,10 @@ training:
 внедрения test-like обучения на контрольной маске из 1000 точек direct показал
 RMSE 0.072809, residual-linear — 0.073607, а residual-neighbor-mean — 0.073970.
 Изменение блока `training` инвалидирует кэш модели и вызывает переобучение.
+
+`use_context_labels` включает трансдуктивное обучение: известные `primary_ndvi`
+из входного ряда используются как дополнительные разрешённые обучающие точки.
+Строки `is_synthetic_gap=true` остаются пустыми и в обучение не попадают.
 
 Опциональный режим `test_like_blocks` создаёт несколько обучающих реплик и одновременно скрывает
 целые блоки наблюдений. Длины блоков повторяют распределение test. В скрытых
